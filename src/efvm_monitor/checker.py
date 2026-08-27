@@ -183,7 +183,9 @@ class EFVMClient:
         return int(travel_datetime.timestamp() * 1000)
 
     @staticmethod
-    def _find_station(stations: list[dict[str, Any]], value: str, field_name: str) -> dict[str, Any]:
+    def _find_station(
+        stations: list[dict[str, Any]], value: str, field_name: str
+    ) -> dict[str, Any]:
         normalized = _normalize(value)
         matches = [
             station
