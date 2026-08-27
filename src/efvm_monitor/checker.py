@@ -74,6 +74,35 @@ class EFVMClient:
     def close(self) -> None:
         self._client.close()
 
+    def get_public_catalog(self) -> dict[str, Any]:
+        """Retorna somente os dados necessários para preencher o formulário local."""
+        catalog = self._catalog or self._load_catalog()
+        self._catalog = catalog
+        stations = sorted(
+            (
+                {
+                    "id": station["id"],
+                    "name": station["descricaoInternet"],
+                    "state": station.get("unidadeFederacao"),
+                }
+                for station in catalog["stations"]
+            ),
+            key=lambda station: _normalize(station["name"]),
+        )
+        allowed_classes = {"economica", "executiva"}
+        classes = [
+            {"id": travel_class["id"], "name": travel_class["nome"]}
+            for travel_class in catalog["classes"]
+            if _normalize(travel_class.get("nome", "")) in allowed_classes
+        ]
+        if not classes:
+            raise PortalError("O portal não retornou classes Econômica ou Executiva.")
+        return {
+            "stations": stations,
+            "classes": classes,
+            "sale_window_days": catalog["sale_window_days"],
+        }
+
     def check(self) -> AvailabilityResult:
         """Consulta uma vez e sempre devolve TEM_VAGA, SEM_VAGA ou ERRO."""
         try:
