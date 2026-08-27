@@ -8,6 +8,7 @@ import httpx
 
 from efvm_monitor.checker import AvailabilityResult, AvailabilityStatus
 from efvm_monitor.config import Settings
+from efvm_monitor.network import verified_ssl_context
 
 LOGGER = logging.getLogger(__name__)
 PURCHASE_URL = "https://tremdepassageiros.vale.com/sgpweb/portal/index.html#/home"
@@ -40,11 +41,11 @@ def send_availability_alert(settings: Settings, result: AvailabilityResult) -> N
         "available_options": result.available_options,
         "purchase_url": PURCHASE_URL,
     }
-    response = httpx.post(
-        settings.alert_webhook_url,
-        json=payload,
+    with httpx.Client(
         timeout=settings.timeout_seconds,
         follow_redirects=False,
-    )
-    response.raise_for_status()
+        verify=verified_ssl_context(),
+    ) as client:
+        response = client.post(settings.alert_webhook_url, json=payload)
+        response.raise_for_status()
     LOGGER.info("Alerta enviado ao webhook configurado.")
