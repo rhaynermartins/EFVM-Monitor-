@@ -78,6 +78,8 @@ class Settings:
             raise ConfigurationError("Origem e destino devem ser diferentes.")
         if not normalized_class:
             raise ConfigurationError("A classe é obrigatória.")
+        if travel_date <= date.today():
+            raise ConfigurationError("A data deve ser posterior ao dia atual.")
         if passengers != 1:
             raise ConfigurationError("A Fase 2 permite exatamente 1 passageiro.")
         if check_interval_seconds < 60:
