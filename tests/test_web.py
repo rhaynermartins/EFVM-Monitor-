@@ -10,7 +10,6 @@ from efvm_monitor.config import Settings
 from efvm_monitor.monitor import MonitorSnapshot
 from efvm_monitor.web import create_app
 
-
 CATALOG = {
     "stations": [
         {"id": 7185, "name": "Belo Horizonte", "state": "MG"},
