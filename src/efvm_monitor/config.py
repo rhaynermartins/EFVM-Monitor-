@@ -50,6 +50,60 @@ class Settings:
     alert_webhook_url: str | None
 
     @classmethod
+    def for_query(
+        cls,
+        *,
+        origin: str,
+        destination: str,
+        travel_date: date,
+        travel_class: str,
+        passengers: int = 1,
+        check_interval_seconds: int = 300,
+        timeout_seconds: int = 30,
+        log_level: str = "INFO",
+        base_url: str = "https://tremdepassageiros.vale.com/sgpweb/rest",
+        railway_code: str = "03",
+        alert_webhook_url: str | None = None,
+    ) -> Settings:
+        """Cria uma configuração a partir de dados já recebidos pela aplicação."""
+        normalized_origin = origin.strip()
+        normalized_destination = destination.strip()
+        normalized_class = travel_class.strip()
+        normalized_level = log_level.strip().upper()
+        normalized_url = base_url.strip().rstrip("/")
+
+        if not normalized_origin or not normalized_destination:
+            raise ConfigurationError("Origem e destino são obrigatórios.")
+        if normalized_origin.casefold() == normalized_destination.casefold():
+            raise ConfigurationError("Origem e destino devem ser diferentes.")
+        if not normalized_class:
+            raise ConfigurationError("A classe é obrigatória.")
+        if passengers != 1:
+            raise ConfigurationError("A Fase 2 permite exatamente 1 passageiro.")
+        if check_interval_seconds < 60:
+            raise ConfigurationError("O intervalo mínimo é de 60 segundos.")
+        if not 5 <= timeout_seconds <= 120:
+            raise ConfigurationError("O timeout deve ficar entre 5 e 120 segundos.")
+        if normalized_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            raise ConfigurationError("O nível de log possui um valor inválido.")
+        if not normalized_url.startswith(("https://", "http://")):
+            raise ConfigurationError("A URL base deve começar com http:// ou https://.")
+
+        return cls(
+            origin=normalized_origin,
+            destination=normalized_destination,
+            travel_date=travel_date,
+            travel_class=normalized_class,
+            passengers=passengers,
+            check_interval_seconds=check_interval_seconds,
+            timeout_seconds=timeout_seconds,
+            log_level=normalized_level,
+            base_url=normalized_url,
+            railway_code=railway_code.strip() or "03",
+            alert_webhook_url=(alert_webhook_url or "").strip() or None,
+        )
+
+    @classmethod
     def from_env(cls, env_file: str | None = None) -> Settings:
         load_dotenv(dotenv_path=env_file)
 
