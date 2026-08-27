@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from efvm_monitor.config import Settings
+from efvm_monitor.network import verified_ssl_context
 
 LOGGER = logging.getLogger(__name__)
 LOCAL_TIMEZONE = ZoneInfo("America/Sao_Paulo")
@@ -55,6 +56,7 @@ class EFVMClient:
             base_url=settings.base_url,
             timeout=settings.timeout_seconds,
             follow_redirects=False,
+            verify=verified_ssl_context(),
             headers={
                 "Accept": "application/json",
                 "Content-Type": "application/json",
