@@ -135,6 +135,7 @@ src/efvm_monitor/
 ├── checker.py   # catálogos públicos, consulta e classificação
 ├── cli.py       # execução única/contínua e logs
 ├── config.py    # leitura e validação do .env
+├── network.py   # HTTPS verificado com certificados do sistema
 └── notifier.py  # alerta local e webhook opcional
 tests/
 └── test_checker.py
