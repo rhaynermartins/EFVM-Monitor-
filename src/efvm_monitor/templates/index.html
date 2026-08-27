@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Monitor local de disponibilidade de passagens da EFVM">
+    <title>EFVM Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+    <script defer src="{{ url_for('static', path='/app.js') }}"></script>
+  </head>
+  <body data-minimum-date="{{ minimum_date }}">
+    <header class="site-header">
+      <div class="header-content">
+        <a class="brand" href="/" aria-label="Página inicial do EFVM Monitor">
+          <span class="brand-mark" aria-hidden="true">EF</span>
+          <span>
+            <strong>EFVM Monitor</strong>
+            <small>Disponibilidade de passagens</small>
+          </span>
+        </a>
+        <a
+          class="official-link"
+          href="{{ official_portal_url }}"
+          target="_blank"
+          rel="noreferrer"
+        >Abrir portal oficial</a>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">Monitoramento local</p>
+        <h1 id="page-title">Encontre a passagem. A compra continua sendo sua.</h1>
+        <p>
+          Escolha o trajeto e a data. O monitor consulta a disponibilidade e avisa quando
+          encontrar uma opção, sem reservar assento e sem acessar dados pessoais.
+        </p>
+      </section>
+
+      <div class="content-grid">
+        <section class="panel form-panel" aria-labelledby="form-title">
+          <div class="panel-heading">
+            <div>
+              <p class="step-label">Passo 1</p>
+              <h2 id="form-title">Configure a viagem</h2>
+            </div>
+            <span id="catalog-state" class="catalog-state" role="status">Carregando opções…</span>
+          </div>
+
+          <form id="monitor-form">
+            <div class="field-grid">
+              <label class="field">
+                <span>Origem</span>
+                <select id="origin" name="origin" required disabled>
+                  <option value="">Carregando estações…</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Destino</span>
+                <select id="destination" name="destination" required disabled>
+                  <option value="">Carregando estações…</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Data da viagem</span>
+                <input id="travel-date" name="travel_date" type="date" required>
+              </label>
+
+              <label class="field">
+                <span>Classe</span>
+                <select id="travel-class" name="travel_class" required disabled>
+                  <option value="">Carregando classes…</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Passageiros</span>
+                <select id="passengers" name="passengers" disabled>
+                  <option value="1">1 passageiro</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Verificar a cada</span>
+                <select id="interval" name="interval_seconds">
+                  <option value="60">1 minuto</option>
+                  <option value="300" selected>5 minutos</option>
+                  <option value="600">10 minutos</option>
+                  <option value="1800">30 minutos</option>
+                </select>
+              </label>
+            </div>
+
+            <label class="notification-option">
+              <input id="browser-notifications" type="checkbox">
+              <span>
+                <strong>Notificação do navegador</strong>
+                <small>Peça permissão ao iniciar e avise quando aparecer uma vaga.</small>
+              </span>
+            </label>
+
+            <p id="form-error" class="form-error" role="alert" hidden></p>
+
+            <div class="form-actions">
+              <button id="start-button" class="button button-primary" type="submit" disabled>
+                Iniciar monitoramento
+              </button>
+              <button id="stop-button" class="button button-secondary" type="button" disabled>
+                Parar
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel status-panel" aria-labelledby="status-title">
+          <div class="panel-heading">
+            <div>
+              <p class="step-label">Passo 2</p>
+              <h2 id="status-title">Acompanhe o estado</h2>
+            </div>
+            <span id="status-badge" class="status-badge status-parado">PARADO</span>
+          </div>
+
+          <div class="status-display" aria-live="polite">
+            <div id="status-icon" class="status-icon" aria-hidden="true">—</div>
+            <div>
+              <strong id="status-message">Nenhum monitoramento iniciado.</strong>
+              <p id="last-check">A última verificação aparecerá aqui.</p>
+            </div>
+          </div>
+
+          <dl id="query-summary" class="query-summary" hidden>
+            <div>
+              <dt>Trajeto</dt>
+              <dd id="summary-route">—</dd>
+            </div>
+            <div>
+              <dt>Data e classe</dt>
+              <dd id="summary-date-class">—</dd>
+            </div>
+            <div>
+              <dt>Intervalo</dt>
+              <dd id="summary-interval">—</dd>
+            </div>
+          </dl>
+
+          <div class="scope-note">
+            <strong>O monitor não compra passagens.</strong>
+            <p>Quando houver vaga, abra o portal oficial e conclua a compra manualmente.</p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer>
+      Projeto independente, sem vínculo com a Vale. Use consultas em intervalos responsáveis.
+    </footer>
+  </body>
+</html>
