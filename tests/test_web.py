@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import date, timedelta
 from typing import Any
 
 import pytest
@@ -62,7 +63,7 @@ def valid_payload() -> dict[str, Any]:
     return {
         "origin": "7185",
         "destination": "7157",
-        "travel_date": "2026-09-15",
+        "travel_date": (date.today() + timedelta(days=10)).isoformat(),
         "travel_class": "Econômica",
         "passengers": 1,
         "interval_seconds": 300,
@@ -127,3 +128,14 @@ def test_rejects_more_than_one_passenger(web_client: tuple[TestClient, StubMonit
     response = client.post("/api/monitoramento", json=payload)
 
     assert response.status_code == 422
+
+
+def test_rejects_past_travel_date(web_client: tuple[TestClient, StubMonitor]) -> None:
+    client, _ = web_client
+    payload = valid_payload()
+    payload["travel_date"] = (date.today() - timedelta(days=1)).isoformat()
+
+    response = client.post("/api/monitoramento", json=payload)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "A data deve ser posterior ao dia atual."
