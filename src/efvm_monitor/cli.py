@@ -89,7 +89,11 @@ def watch(settings: Settings) -> int:
         while True:
             result = client.check()
             _print_result(result)
-            if result.status is AvailabilityStatus.TEM_VAGA and previous_status is not result.status:
+            became_available = (
+                result.status is AvailabilityStatus.TEM_VAGA
+                and previous_status is not result.status
+            )
+            if became_available:
                 _notify(settings, result)
             previous_status = result.status
             time.sleep(settings.check_interval_seconds)
