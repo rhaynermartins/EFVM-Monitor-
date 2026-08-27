@@ -4,7 +4,7 @@ Prova de conceito em Python para consultar a disponibilidade de passagens do Tre
 Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O projeto
 **não compra passagem** e não acessa etapas de login, CPF, reserva, assento ou pagamento.
 
-## Escopo da Fase 1
+## Escopo atual — Fases 1 e 2
 
 - configurar origem, destino, data, classe e quantidade de passageiros em `.env`;
 - consultar somente interfaces públicas usadas antes do fluxo de compra;
@@ -12,6 +12,9 @@ Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O pr
 - registrar logs no terminal e em `logs/efvm-monitor.log`;
 - emitir alerta no terminal e, opcionalmente, por webhook;
 - executar uma vez ou repetir a consulta em intervalo controlado.
+- escolher origem, destino, data e classe em uma interface local;
+- iniciar, acompanhar e parar um único monitoramento pelo navegador;
+- emitir, opcionalmente, uma notificação nativa do navegador.
 
 Não fazem parte deste MVP: login, dados pessoais, escolha ou bloqueio de assento, reserva,
 pagamento, compra, solução de CAPTCHA e qualquer tentativa de contornar bloqueios ou
@@ -53,7 +56,7 @@ python -m pip install -e '.[dev]'
 cp .env.example .env
 ```
 
-Edite o `.env` e ajuste principalmente:
+Para usar o CLI, edite o `.env` e ajuste principalmente:
 
 ```dotenv
 EFVM_ORIGIN=Belo Horizonte
@@ -67,7 +70,31 @@ Os nomes precisam corresponder aos nomes reais retornados pelo portal. Também �
 usar o ID numérico da estação ou classe. O programa não aceita correspondência parcial para
 não escolher uma estação errada por aproximação.
 
-## Execução
+## Interface local
+
+Inicie o servidor:
+
+```bash
+efvm-monitor-web
+```
+
+Abra [http://127.0.0.1:8000](http://127.0.0.1:8000) no navegador. A tela permite:
+
+- selecionar origem e destino na lista atual do portal;
+- escolher uma data dentro da janela vigente de venda;
+- selecionar classe Econômica ou Executiva;
+- monitorar exatamente 1 passageiro;
+- escolher intervalos a partir de 60 segundos;
+- iniciar e parar o monitoramento;
+- acompanhar `AGUARDANDO`, `TEM_VAGA`, `SEM_VAGA`, `ERRO` e `PARADO`;
+- ativar notificação do navegador quando aparecer uma vaga.
+
+O servidor escuta apenas em `127.0.0.1` e não fica exposto à rede local. Para usar outra
+porta, altere `EFVM_WEB_PORT` no `.env`.
+
+O estado fica somente em memória. Encerrar o servidor encerra o monitoramento ativo.
+
+## Execução pelo terminal
 
 Consulta única:
 
@@ -125,8 +152,18 @@ pytest
 ruff check .
 ```
 
-Os testes locais verificam a classificação dos três estados e garantem que nomes parciais de
-estações não sejam adivinhados. Eles não fazem chamadas ao portal.
+Os testes locais verificam a classificação dos três estados, o serviço em segundo plano, as
+cinco rotas da interface e as validações do formulário. Eles não fazem chamadas ao portal.
+
+## Rotas locais
+
+| Método | Rota | Função |
+| --- | --- | --- |
+| `GET` | `/` | Exibe a interface |
+| `GET` | `/api/catalogo` | Lista estações, classes e janela de venda |
+| `POST` | `/api/monitoramento` | Inicia um monitoramento |
+| `GET` | `/api/monitoramento` | Consulta o estado atual |
+| `DELETE` | `/api/monitoramento` | Solicita a parada |
 
 ## Estrutura
 
@@ -135,10 +172,16 @@ src/efvm_monitor/
 ├── checker.py   # catálogos públicos, consulta e classificação
 ├── cli.py       # execução única/contínua e logs
 ├── config.py    # leitura e validação do .env
+├── monitor.py   # ciclo em segundo plano e estado em memória
 ├── network.py   # HTTPS verificado com certificados do sistema
-└── notifier.py  # alerta local e webhook opcional
+├── notifier.py  # alerta local e webhook opcional
+├── web.py       # servidor e rotas locais
+├── static/      # estilos e interação do formulário
+└── templates/   # página HTML
 tests/
-└── test_checker.py
+├── test_checker.py
+├── test_monitor.py
+└── test_web.py
 ```
 
 ## Limitações conhecidas
@@ -149,6 +192,8 @@ tests/
   reserva garantida;
 - uma resposta inesperada é classificada como `ERRO`, nunca como ausência de vaga;
 - o monitor depende da janela de venda informada dinamicamente pelo portal.
+- somente um monitoramento pode ficar ativo por processo;
+- o monitoramento não é retomado automaticamente após fechar o servidor.
 
 ## Uso responsável
 
