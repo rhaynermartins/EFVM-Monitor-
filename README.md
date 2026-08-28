@@ -4,7 +4,7 @@ Prova de conceito em Python para consultar a disponibilidade de passagens do Tre
 Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O projeto
 **não compra passagem** e não acessa etapas de login, CPF, reserva, assento ou pagamento.
 
-## Escopo atual — Fases 1, 2 e 3
+## Escopo atual — Fases 1, 2, 3 e 4
 
 - configurar origem, destino, data, classe e quantidade de passageiros em `.env`;
 - consultar somente interfaces públicas usadas antes do fluxo de compra;
@@ -18,6 +18,10 @@ Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O pr
 - persistir a configuração e o estado em SQLite local;
 - registrar o histórico de `TEM_VAGA`, `SEM_VAGA` e `ERRO`;
 - recuperar o último monitor salvo e retomar automaticamente o que estava ativo.
+- enviar alerta pelo WhatsApp Cloud API oficial quando o estado muda para `TEM_VAGA`;
+- evitar mensagens repetidas enquanto a disponibilidade continuar `TEM_VAGA`;
+- registrar tentativas, sucessos e falhas dos alertas no SQLite;
+- manter o monitor funcionando mesmo quando o WhatsApp estiver indisponível.
 
 Não fazem parte deste MVP: login, dados pessoais, escolha ou bloqueio de assento, reserva,
 pagamento, compra, solução de CAPTCHA e qualquer tentativa de contornar bloqueios ou
@@ -90,8 +94,13 @@ Abra [http://127.0.0.1:8000](http://127.0.0.1:8000) no navegador. A tela permite
 - escolher intervalos a partir de 60 segundos;
 - iniciar e parar o monitoramento;
 - acompanhar `AGUARDANDO`, `TEM_VAGA`, `SEM_VAGA`, `ERRO` e `PARADO`;
-- ativar notificação do navegador quando aparecer uma vaga.
+- ativar o WhatsApp como alerta principal, quando configurado;
+- ativar a notificação complementar do navegador;
 - consultar as verificações recentes persistidas no painel.
+
+O fluxo visual segue a ordem de uso: primeiro aparece **PASSO 1 — Configure a viagem** e,
+logo abaixo no mobile ou ao lado no desktop, **PASSO 2 — Acompanhe o estado**. O card de
+acompanhamento nunca é movido para antes da configuração.
 
 O servidor escuta apenas em `127.0.0.1` e não fica exposto à rede local. Para usar outra
 porta, altere `EFVM_WEB_PORT` no `.env`.
@@ -110,12 +119,20 @@ Tabelas atuais:
 
 - `monitoring_jobs`: configuração, estado, último resultado e datas relevantes;
 - `check_history`: uma linha para cada verificação concluída;
+- `monitoring_notification_preferences`: preferência do WhatsApp e nomes exibidos no alerta;
+- `notification_deliveries`: tentativas, resultado, canal e situação dos envios;
 - `schema_migrations`: versões de schema já aplicadas.
 
 O status do monitor é numérico no banco:
 
 - `0 = pausado`;
 - `1 = ativo`.
+
+O status da entrega também é numérico:
+
+- `0 = pendente`;
+- `1 = enviado`;
+- `2 = falhou`.
 
 O SQL fica centralizado em `database.py` e nos arquivos de `migrations/`. Os valores recebidos
 do usuário são enviados ao SQLite por parâmetros, sem concatenação na consulta.
@@ -140,6 +157,18 @@ Também é possível apontar para outro arquivo de configuração:
 efvm-monitor --env-file caminho/consulta.env
 ```
 
+Para enviar uma mensagem de teste sem consultar disponibilidade:
+
+```bash
+efvm-monitor test-whatsapp
+```
+
+Ou diretamente pelo módulo:
+
+```bash
+python -m efvm_monitor.cli test-whatsapp
+```
+
 Exemplos de saída:
 
 ```text
@@ -156,10 +185,51 @@ Códigos de saída da consulta única:
 | `1` | `SEM_VAGA` |
 | `2` | `ERRO`, inclusive falha no webhook |
 
-No modo contínuo, o alerta é emitido quando o estado muda para `TEM_VAGA`, evitando um novo
-alerta idêntico a cada ciclo.
+No modo contínuo, o alerta é emitido quando o estado muda para `TEM_VAGA`. Enquanto continuar
+`TEM_VAGA`, nenhuma nova mensagem é enviada. Depois de `TEM_VAGA → SEM_VAGA → TEM_VAGA`, um
+novo alerta pode ser enviado.
 
-## Webhook opcional
+## WhatsApp Cloud API
+
+O canal principal usa exclusivamente a
+[WhatsApp Cloud API oficial da Meta](https://developers.facebook.com/docs/whatsapp/cloud-api/).
+Não usa WhatsApp Web, navegador aberto, leitura de QR Code ou automação visual.
+
+Crie uma aplicação na Meta, configure um número remetente e preencha no `.env`:
+
+```dotenv
+WHATSAPP_ENABLED=true
+WHATSAPP_ACCESS_TOKEN=
+WHATSAPP_PHONE_NUMBER_ID=
+WHATSAPP_RECIPIENT_PHONE=5531999999999
+WHATSAPP_API_VERSION=v26.0
+```
+
+O destinatário deve usar o formato internacional, somente com números. A versão da Graph API
+fica configurável porque a Meta atualiza suas versões periodicamente.
+
+Para mensagens iniciadas pela aplicação fora da janela de atendimento, configure um template
+aprovado no WhatsApp Manager:
+
+```dotenv
+WHATSAPP_TEMPLATE_NAME=alerta_disponibilidade_efvm
+WHATSAPP_TEMPLATE_LANGUAGE=pt_BR
+```
+
+O template deve possuir sete parâmetros de corpo, nesta ordem: origem, destino, data, classe,
+passageiros, horário da detecção e link oficial. Sem `WHATSAPP_TEMPLATE_NAME`, a integração
+envia texto livre, adequado apenas quando as regras vigentes da conta e da janela de conversa
+permitirem.
+
+Falhas temporárias de conexão, HTTP `429` e respostas `5xx` usam tentativas limitadas com
+espera crescente. Uma conexão interrompida depois que o envio pode ter começado não é repetida
+automaticamente, reduzindo o risco de mensagem duplicada. Toda falha é registrada e nunca
+interrompe o monitoramento.
+
+O `.env` já está protegido pelo `.gitignore`. Nunca copie token, número privado ou credencial
+para `.env.example`, código, commit, captura de tela ou relatório de teste.
+
+## Webhook complementar
 
 Defina `ALERT_WEBHOOK_URL` para receber um `POST` JSON quando houver vaga:
 
@@ -168,8 +238,8 @@ ALERT_WEBHOOK_URL=https://seu-servico.example/alerta
 ```
 
 O corpo contém apenas status, trajeto, data, classe, quantidade de opções e o link do portal.
-Não contém CPF, credenciais, dados de pagamento ou token de compra. Sem webhook, o alerta
-continua disponível no terminal e no arquivo de log.
+Não contém CPF, credenciais, dados de pagamento ou token de compra. O webhook foi preservado
+por compatibilidade, mas não é o canal principal.
 
 ## Testes e qualidade
 
@@ -179,8 +249,9 @@ ruff check .
 ```
 
 Os testes locais verificam a classificação dos três estados, migrations idempotentes,
-persistência, histórico, retomada após reinicialização, serviço em segundo plano, rotas e
-validações do formulário. Eles não fazem chamadas ao portal.
+persistência, histórico, retomada após reinicialização, deduplicação de alertas, retry,
+continuidade após falha de notificação, serviço em segundo plano, rotas e validações do
+formulário. Eles não fazem chamadas ao portal nem enviam mensagens reais.
 
 ## Rotas locais
 
@@ -204,7 +275,7 @@ src/efvm_monitor/
 ├── migrations/  # evolução idempotente do schema local
 ├── monitor.py   # ciclo em segundo plano, persistência e retomada
 ├── network.py   # HTTPS verificado com certificados do sistema
-├── notifier.py  # alerta local e webhook opcional
+├── notifier.py  # WhatsApp Cloud API, retry e canais complementares
 ├── web.py       # servidor e rotas locais
 ├── static/      # estilos e interação do formulário
 └── templates/   # página HTML
@@ -212,6 +283,7 @@ tests/
 ├── test_checker.py
 ├── test_database.py
 ├── test_monitor.py
+├── test_notifier.py
 └── test_web.py
 ```
 
@@ -226,6 +298,8 @@ tests/
 - somente um monitoramento pode ficar ativo por processo;
 - uma configuração salva cuja data já expirou é recuperada como `ERRO` e não é iniciada;
 - múltiplos monitoramentos simultâneos continuam reservados para a Fase 5.
+- o envio real depende de uma conta Meta válida, destinatário permitido e, quando aplicável,
+  template aprovado;
 
 ## Uso responsável
 
