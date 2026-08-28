@@ -166,7 +166,7 @@ class Settings:
             railway_code=os.getenv("EFVM_RAILWAY_CODE", "03").strip() or "03",
             alert_webhook_url=webhook,
             whatsapp_enabled=_boolean("WHATSAPP_ENABLED", False),
-            sms_enabled=_boolean("SMS_ENABLED", True),
+            sms_enabled=_boolean("SMS_ENABLED", False),
             origin_label=origin,
             destination_label=destination,
         )
