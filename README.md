@@ -4,7 +4,7 @@ Prova de conceito em Python para consultar a disponibilidade de passagens do Tre
 Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O projeto
 **não compra passagem** e não acessa etapas de login, CPF, reserva, assento ou pagamento.
 
-## Escopo atual — Fases 1, 2, 3 e 4
+## Escopo atual — Fases 1, 2, 3, 4 e 4.1
 
 - configurar origem, destino, data, classe e quantidade de passageiros em `.env`;
 - consultar somente interfaces públicas usadas antes do fluxo de compra;
@@ -18,10 +18,10 @@ Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O pr
 - persistir a configuração e o estado em SQLite local;
 - registrar o histórico de `TEM_VAGA`, `SEM_VAGA` e `ERRO`;
 - recuperar o último monitor salvo e retomar automaticamente o que estava ativo.
-- enviar alerta pelo WhatsApp Cloud API oficial quando o estado muda para `TEM_VAGA`;
+- enviar alerta SMS pela Twilio quando o estado muda para `TEM_VAGA`;
 - evitar mensagens repetidas enquanto a disponibilidade continuar `TEM_VAGA`;
 - registrar tentativas, sucessos e falhas dos alertas no SQLite;
-- manter o monitor funcionando mesmo quando o WhatsApp estiver indisponível.
+- manter o monitor funcionando mesmo quando um canal estiver indisponível.
 
 Não fazem parte deste MVP: login, dados pessoais, escolha ou bloqueio de assento, reserva,
 pagamento, compra, solução de CAPTCHA e qualquer tentativa de contornar bloqueios ou
@@ -94,7 +94,7 @@ Abra [http://127.0.0.1:8000](http://127.0.0.1:8000) no navegador. A tela permite
 - escolher intervalos a partir de 60 segundos;
 - iniciar e parar o monitoramento;
 - acompanhar `AGUARDANDO`, `TEM_VAGA`, `SEM_VAGA`, `ERRO` e `PARADO`;
-- ativar o WhatsApp como alerta principal, quando configurado;
+- ativar o SMS como alerta principal, quando configurado;
 - ativar a notificação complementar do navegador;
 - consultar as verificações recentes persistidas no painel.
 
@@ -189,9 +189,43 @@ No modo contínuo, o alerta é emitido quando o estado muda para `TEM_VAGA`. Enq
 `TEM_VAGA`, nenhuma nova mensagem é enviada. Depois de `TEM_VAGA → SEM_VAGA → TEM_VAGA`, um
 novo alerta pode ser enviado.
 
-## WhatsApp Cloud API
+## SMS via Twilio — canal principal
 
-O canal principal usa exclusivamente a
+O SMS é o canal principal do MVP. A integração usa a API REST oficial da Twilio por meio do
+`httpx` já instalado, sem dependência adicional. Crie uma conta no
+[Twilio Console](https://console.twilio.com/), obtenha um número habilitado para SMS e preencha:
+
+```dotenv
+SMS_ENABLED=true
+SMS_PROVIDER=twilio
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=seu_token
+TWILIO_FROM_NUMBER=+15551234567
+SMS_RECIPIENT_PHONE=+5531999999999
+SMS_DRY_RUN=false
+```
+
+Os telefones devem usar E.164: sinal `+`, código do país, DDD e número, sem prefixos locais.
+Contas de teste podem exigir que o destinatário seja previamente verificado. SMS pode gerar
+custos e mensagens longas podem ser cobradas em múltiplos segmentos.
+
+Teste sem depender de passagem disponível:
+
+```bash
+efvm-monitor test-sms
+```
+
+Antes do primeiro envio real, use `SMS_DRY_RUN=true`. Nesse modo a mensagem, validação,
+deduplicação e persistência são exercitadas, mas a Twilio não é chamada. Para desativar o canal,
+use `SMS_ENABLED=false`.
+
+O destinatário é exibido e salvo apenas de forma mascarada. O Auth Token nunca é persistido nem
+registrado em log. Falhas de autenticação, saldo, HTTP, timeout ou indisponibilidade ficam
+registradas como falha de entrega e não encerram o monitor.
+
+## WhatsApp Cloud API — complementar
+
+O canal complementar usa exclusivamente a
 [WhatsApp Cloud API oficial da Meta](https://developers.facebook.com/docs/whatsapp/cloud-api/).
 Não usa WhatsApp Web, navegador aberto, leitura de QR Code ou automação visual.
 
@@ -275,7 +309,7 @@ src/efvm_monitor/
 ├── migrations/  # evolução idempotente do schema local
 ├── monitor.py   # ciclo em segundo plano, persistência e retomada
 ├── network.py   # HTTPS verificado com certificados do sistema
-├── notifier.py  # WhatsApp Cloud API, retry e canais complementares
+├── notifier.py  # SMS/Twilio, WhatsApp, retry e canais complementares
 ├── web.py       # servidor e rotas locais
 ├── static/      # estilos e interação do formulário
 └── templates/   # página HTML
@@ -285,6 +319,7 @@ tests/
 ├── test_database.py
 ├── test_monitor.py
 ├── test_notifier.py
+├── test_sms.py
 └── test_web.py
 ```
 
