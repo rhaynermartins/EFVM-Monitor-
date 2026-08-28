@@ -128,3 +128,32 @@ def test_logs_in_again_with_persisted_credentials(
     assert rejected.status_code == 401
     assert accepted.status_code == 200
     assert client.get("/").status_code == 200
+
+
+def test_session_survives_application_restart(tmp_path: Path) -> None:
+    database_path = tmp_path / "persistent-session.db"
+    first_storage = MonitoringRepository(database_path)
+    first_manager = MonitoringManager(first_storage, notifier=lambda *_: None)
+    first_app = create_app(
+        manager=first_manager,
+        repository=first_storage,
+        catalog_provider=lambda: CATALOG,
+    )
+    with TestClient(first_app) as first_client:
+        register(first_client)
+        session_cookie = first_client.cookies.get("efvm_session")
+        assert session_cookie
+
+    restarted_storage = MonitoringRepository(database_path)
+    restarted_manager = MonitoringManager(restarted_storage, notifier=lambda *_: None)
+    restarted_app = create_app(
+        manager=restarted_manager,
+        repository=restarted_storage,
+        catalog_provider=lambda: CATALOG,
+    )
+    with TestClient(restarted_app) as restarted_client:
+        restarted_client.cookies.set("efvm_session", session_cookie)
+        current = restarted_client.get("/api/auth/me")
+
+    assert current.status_code == 200
+    assert current.json()["user"]["email"] == ACCOUNT["email"]
