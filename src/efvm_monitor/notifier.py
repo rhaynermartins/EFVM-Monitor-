@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 from efvm_monitor.checker import AvailabilityResult, AvailabilityStatus
 from efvm_monitor.config import Settings
-from efvm_monitor.database import MonitoringRepository, NotificationStatus
+from efvm_monitor.database import LEGACY_USER_ID, MonitoringRepository, NotificationStatus
 from efvm_monitor.network import verified_ssl_context
 from efvm_monitor.web_push import (
     WebPushConfig,
@@ -413,10 +413,14 @@ class NotificationService:
             "EFVM Monitor: SMS de teste. O sistema apenas alerta e nao compra passagens."
         )
 
-    def send_test_web_push(self, device_id: str) -> int:
+    def send_test_web_push(
+        self,
+        device_id: str,
+        user_id: int = LEGACY_USER_ID,
+    ) -> int:
         if self._web_push is None:
             raise WebPushSendError("Persistência Web Push indisponível.", 0)
-        return self._web_push.send_test(device_id)
+        return self._web_push.send_test(device_id, user_id)
 
     def _notify_sms(
         self,
