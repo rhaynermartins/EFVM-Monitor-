@@ -16,7 +16,8 @@ from efvm_monitor.web_push import WebPushConfig, WebPushNotifier
 
 
 class QuietMonitor:
-    def start(self, _settings: Settings) -> MonitorSnapshot:
+    def start(self, _settings: Settings, user_id: int = 1) -> MonitorSnapshot:
+        assert user_id == 1
         return MonitorSnapshot(running=True, status="AGUARDANDO")
 
     def stop(self) -> MonitorSnapshot:
@@ -57,8 +58,10 @@ def push_client(tmp_path: Path) -> Iterator[tuple[TestClient, list[dict[str, Any
         repository=storage,
         catalog_provider=lambda: {"stations": [], "classes": [], "sale_window_days": 45},
         notification_service=notification_service,
+        authentication_enabled=False,
     )
     with TestClient(application) as client:
+        client.headers["X-CSRF-Token"] = "test-csrf-token"
         yield client, calls
 
 
