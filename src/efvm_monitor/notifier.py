@@ -18,6 +18,11 @@ from efvm_monitor.checker import AvailabilityResult, AvailabilityStatus
 from efvm_monitor.config import Settings
 from efvm_monitor.database import MonitoringRepository, NotificationStatus
 from efvm_monitor.network import verified_ssl_context
+from efvm_monitor.web_push import (
+    WebPushConfig,
+    WebPushNotifier,
+    WebPushSendError,
+)
 
 LOGGER = logging.getLogger(__name__)
 PURCHASE_URL = "https://tremdepassageiros.vale.com/sgpweb/portal/index.html#/home"
@@ -326,12 +331,18 @@ class NotificationService:
         whatsapp_config: WhatsAppConfig | None = None,
         sms_notifier: TwilioSMSNotifier | None = None,
         sms_config: SMSConfig | None = None,
+        web_push_notifier: WebPushNotifier | None = None,
+        web_push_config: WebPushConfig | None = None,
     ) -> None:
         self._repository = repository
         self.whatsapp_config = whatsapp_config or WhatsAppConfig.from_env()
         self._whatsapp = whatsapp_client or WhatsAppCloudClient(self.whatsapp_config)
         self.sms_config = sms_config or SMSConfig.from_env()
         self._sms = sms_notifier or TwilioSMSNotifier(self.sms_config)
+        self.web_push_config = web_push_config or WebPushConfig.from_env()
+        self._web_push = web_push_notifier
+        if self._web_push is None and repository is not None:
+            self._web_push = WebPushNotifier(repository, self.web_push_config)
 
     @property
     def whatsapp_configured(self) -> bool:
@@ -340,6 +351,14 @@ class NotificationService:
     @property
     def sms_configured(self) -> bool:
         return self.sms_config.configured
+
+    @property
+    def web_push_configured(self) -> bool:
+        return self.web_push_config.configured
+
+    @property
+    def web_push_public_key(self) -> str:
+        return self.web_push_config.public_key if self.web_push_config.configured else ""
 
     @property
     def sms_recipient_masked(self) -> str | None:
@@ -356,6 +375,11 @@ class NotificationService:
     ) -> None:
         if result.status is not AvailabilityStatus.TEM_VAGA:
             return
+        if self._web_push is not None:
+            try:
+                self._web_push.notify(settings, result, monitoring_id, detected_at)
+            except Exception as exc:
+                LOGGER.exception("O alerta Web Push não pôde ser processado: %s", exc)
         if settings.sms_enabled and self.sms_config.enabled:
             try:
                 self._notify_sms(settings, result, monitoring_id, detected_at)
@@ -388,6 +412,11 @@ class NotificationService:
         return self._sms.send(
             "EFVM Monitor: SMS de teste. O sistema apenas alerta e nao compra passagens."
         )
+
+    def send_test_web_push(self, device_id: str) -> int:
+        if self._web_push is None:
+            raise WebPushSendError("Persistência Web Push indisponível.", 0)
+        return self._web_push.send_test(device_id)
 
     def _notify_sms(
         self,
