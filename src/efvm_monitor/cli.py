@@ -18,6 +18,7 @@ from efvm_monitor.config import ConfigurationError, Settings
 from efvm_monitor.notifier import (
     NotificationSendError,
     NotificationService,
+    SMSConfigurationError,
     WhatsAppConfigurationError,
 )
 
@@ -45,7 +46,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=("monitor", "test-whatsapp"),
+        choices=("monitor", "test-whatsapp", "test-sms"),
         default="monitor",
         help="use test-whatsapp para validar a Cloud API sem consultar passagens",
     )
@@ -119,6 +120,16 @@ def watch(settings: Settings, notifier: NotificationService | None = None) -> in
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     load_dotenv(dotenv_path=args.env_file)
+    if args.command == "test-sms":
+        _configure_logging(os.getenv("EFVM_LOG_LEVEL", "INFO").strip().upper())
+        try:
+            result = NotificationService().send_test_sms()
+        except (NotificationSendError, SMSConfigurationError) as exc:
+            print(f"Falha ao enviar SMS.\nMotivo: {exc}", file=sys.stderr)
+            return EXIT_CODES[AvailabilityStatus.ERRO]
+        print("SMS processado com sucesso.")
+        print(f"SID: {result.external_message_id or 'não retornado'}")
+        return 0
     if args.command == "test-whatsapp":
         _configure_logging(os.getenv("EFVM_LOG_LEVEL", "INFO").strip().upper())
         try:
