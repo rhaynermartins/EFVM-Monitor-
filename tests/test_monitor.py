@@ -54,7 +54,7 @@ def test_monitor_reports_result_and_stops() -> None:
     alerts: list[AvailabilityResult] = []
     service = MonitorService(
         client_factory=FakeClient,
-        notifier=lambda _settings, result: alerts.append(result),
+        notifier=lambda _settings, result, *_: alerts.append(result),
     )
 
     started = service.start(settings())
@@ -64,6 +64,25 @@ def test_monitor_reports_result_and_stops() -> None:
     wait_for_status(service, "TEM_VAGA")
     assert len(alerts) == 1
     assert service.snapshot().query["passengers"] == 1
+
+    service.stop()
+    wait_for_status(service, "PARADO")
+
+
+def test_notification_failure_does_not_stop_monitor() -> None:
+    def unavailable_notifier(*_: object) -> None:
+        raise RuntimeError("Canal temporariamente indisponível.")
+
+    service = MonitorService(
+        client_factory=FakeClient,
+        notifier=unavailable_notifier,
+    )
+
+    service.start(settings())
+    wait_for_status(service, "TEM_VAGA")
+
+    assert service.snapshot().running is True
+    assert service.snapshot().status == "TEM_VAGA"
 
     service.stop()
     wait_for_status(service, "PARADO")
