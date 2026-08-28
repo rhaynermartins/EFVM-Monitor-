@@ -4,7 +4,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Monitor local de disponibilidade de passagens da EFVM">
+    <meta name="theme-color" content="#176b4d">
     <title>EFVM Monitor</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
     <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
     <script defer src="{{ url_for('static', path='/app.js') }}"></script>
   </head>
@@ -95,15 +98,36 @@
 
             <fieldset class="alert-options">
               <legend>Alertas</legend>
-              <label class="notification-option notification-primary">
+              <div class="notification-option notification-primary push-option">
+                <span class="push-symbol" aria-hidden="true">↗</span>
+                <span class="push-copy">
+                  <strong>Web Push <em>Principal e gratuito</em></strong>
+                  <small id="push-description">
+                    Receba o alerta mesmo com esta página fechada, após ativar neste dispositivo.
+                  </small>
+                  <span id="push-status" class="push-status" role="status">Verificando suporte…</span>
+                  <span class="push-actions">
+                    <button id="activate-push" class="text-button" type="button">Ativar alertas</button>
+                    <button id="test-push" class="text-button" type="button" hidden>Enviar teste</button>
+                    <button id="disable-push" class="text-button" type="button" hidden>Desativar</button>
+                    <button id="install-app" class="text-button" type="button" hidden>Instalar aplicativo</button>
+                  </span>
+                  <span id="ios-install-help" class="ios-install-help" hidden>
+                    No iPhone, abra no Safari, toque em Compartilhar e escolha “Adicionar à Tela de Início”.
+                    Depois abra o aplicativo instalado para ativar os alertas.
+                  </span>
+                </span>
+              </div>
+
+              <label class="notification-option">
                 <input
                   id="sms-alerts"
                   type="checkbox"
                   data-configured="{{ 'true' if sms_configured else 'false' }}"
-                  {% if sms_configured %}checked{% else %}disabled{% endif %}
+                  {% if not sms_configured %}disabled{% endif %}
                 >
                 <span>
-                  <strong>SMS <em>Principal</em></strong>
+                  <strong>SMS <em>Opcional</em></strong>
                   <small>
                     {% if sms_configured %}
                       Configurado para {{ sms_recipient_masked }} via Twilio.
@@ -119,19 +143,11 @@
                   id="whatsapp-alerts"
                   type="checkbox"
                   data-configured="{{ 'true' if whatsapp_configured else 'false' }}"
-                  {% if whatsapp_configured %}checked{% else %}disabled{% endif %}
+                  {% if not whatsapp_configured %}disabled{% endif %}
                 >
                 <span>
                   <strong>WhatsApp</strong>
                   <small>Canal complementar, desabilitado por padrão.</small>
-                </span>
-              </label>
-
-              <label class="notification-option">
-                <input id="browser-notifications" type="checkbox">
-                <span>
-                  <strong>Notificação do navegador</strong>
-                  <small>Canal complementar enquanto esta página estiver aberta.</small>
                 </span>
               </label>
             </fieldset>
