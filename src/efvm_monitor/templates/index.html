@@ -157,9 +157,9 @@
 
             <div class="form-actions">
               <button id="start-button" class="button button-primary" type="submit" disabled>
-                Iniciar monitoramento
+                Adicionar monitoramento
               </button>
-              <button id="stop-button" class="button button-secondary" type="button" disabled>
+              <button id="stop-button" class="button button-secondary" type="button" hidden disabled>
                 Parar
               </button>
             </div>
@@ -170,43 +170,50 @@
           <div class="panel-heading">
             <div>
               <p class="step-label">Passo 2</p>
-              <h2 id="status-title">Acompanhe o estado</h2>
+              <h2 id="status-title">Acompanhe o estado dos monitores</h2>
             </div>
-            <span id="status-badge" class="status-badge status-parado">PARADO</span>
+            <span id="status-badge" class="status-badge status-parado">0 MONITORES</span>
           </div>
 
-          <div class="status-display" aria-live="polite">
-            <div id="status-icon" class="status-icon" aria-hidden="true">—</div>
-            <div>
-              <strong id="status-message">Nenhum monitoramento iniciado.</strong>
-              <p id="last-check">A última verificação aparecerá aqui.</p>
-            </div>
-          </div>
+          <p id="monitors-empty" class="monitors-empty">
+            Nenhum monitoramento configurado. Adicione a primeira viagem no Passo 1.
+          </p>
+          <div id="monitors-list" class="monitors-list" aria-live="polite"></div>
 
-          <dl id="query-summary" class="query-summary" hidden>
-            <div>
-              <dt>Trajeto</dt>
-              <dd id="summary-route">—</dd>
+          <div id="current-monitor-detail" hidden>
+            <div class="status-display">
+              <div id="status-icon" class="status-icon" aria-hidden="true">—</div>
+              <div>
+                <strong id="status-message">Selecione um monitoramento.</strong>
+                <p id="last-check">A última verificação aparecerá aqui.</p>
+              </div>
             </div>
-            <div>
-              <dt>Data e classe</dt>
-              <dd id="summary-date-class">—</dd>
-            </div>
-            <div>
-              <dt>Intervalo</dt>
-              <dd id="summary-interval">—</dd>
-            </div>
-            <div>
-              <dt>Alertas</dt>
-              <dd id="summary-alerts">—</dd>
-            </div>
-          </dl>
+
+            <dl id="query-summary" class="query-summary" hidden>
+              <div>
+                <dt>Trajeto</dt>
+                <dd id="summary-route">—</dd>
+              </div>
+              <div>
+                <dt>Data e classe</dt>
+                <dd id="summary-date-class">—</dd>
+              </div>
+              <div>
+                <dt>Intervalo</dt>
+                <dd id="summary-interval">—</dd>
+              </div>
+              <div>
+                <dt>Alertas</dt>
+                <dd id="summary-alerts">—</dd>
+              </div>
+            </dl>
+          </div>
 
           <section class="history-section" aria-labelledby="history-title">
             <div class="history-heading">
               <div>
                 <p class="step-label">Persistência local</p>
-                <h3 id="history-title">Histórico recente</h3>
+                <h3 id="history-title">Histórico do monitor selecionado</h3>
               </div>
               <button id="refresh-history" class="text-button" type="button">Atualizar</button>
             </div>
