@@ -120,7 +120,10 @@ class WhatsAppCloudClient:
                 try:
                     response = client.post(url, json=payload)
                     response.raise_for_status()
-                    body = response.json()
+                    try:
+                        body = response.json()
+                    except ValueError:
+                        body = {}
                     messages = body.get("messages", [])
                     external_id = messages[0].get("id") if messages else None
                     return SendResult(external_message_id=external_id, attempts=attempt)
@@ -129,10 +132,16 @@ class WhatsAppCloudClient:
                     retryable = exc.response.status_code == 429 or exc.response.status_code >= 500
                     if not retryable or attempt == self.config.max_attempts:
                         raise NotificationSendError(last_error, attempt) from exc
-                except (httpx.RequestError, ValueError, KeyError, TypeError) as exc:
+                except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
                     last_error = f"Não foi possível concluir o envio: {exc}."
                     if attempt == self.config.max_attempts:
                         raise NotificationSendError(last_error, attempt) from exc
+                except httpx.RequestError as exc:
+                    raise NotificationSendError(
+                        "A conexão foi interrompida após iniciar o envio; "
+                        "a tentativa não será repetida para evitar mensagem duplicada.",
+                        attempt,
+                    ) from exc
                 self._sleep(self.config.retry_delay_seconds * (2 ** (attempt - 1)))
 
         raise NotificationSendError(last_error, self.config.max_attempts)
