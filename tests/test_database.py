@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
 
+from efvm_monitor.auth import hash_password
 from efvm_monitor.checker import AvailabilityStatus
 from efvm_monitor.config import Settings
 from efvm_monitor.database import MonitoringRepository, MonitorStatus, NotificationStatus
@@ -139,3 +140,60 @@ def test_records_and_deduplicates_whatsapp_delivery(tmp_path: Path) -> None:
     assert history[0].status is NotificationStatus.SENT
     assert history[0].attempt_count == 2
     assert history[0].external_message_id == "wamid.123"
+
+
+def test_filters_monitors_and_history_by_owner(tmp_path: Path) -> None:
+    storage = repository(tmp_path)
+    first_user = storage.create_user(
+        name="Usuário A",
+        email="owner-a@example.com",
+        password_hash=hash_password("senha-segura-123"),
+    )
+    second_user = storage.create_user(
+        name="Usuário B",
+        email="owner-b@example.com",
+        password_hash=hash_password("senha-segura-456"),
+    )
+    first_monitor = storage.create_monitor(settings(), user_id=first_user.id)
+    second_monitor = storage.create_monitor(settings(), user_id=second_user.id)
+    storage.record_check(
+        first_monitor.id,
+        AvailabilityStatus.SEM_VAGA,
+        "Indisponível.",
+        "2026-08-28T12:00:00-03:00",
+    )
+
+    assert [item.id for item in storage.list_monitors(user_id=first_user.id)] == [
+        first_monitor.id
+    ]
+    assert [item.id for item in storage.list_monitors(user_id=second_user.id)] == [
+        second_monitor.id
+    ]
+    assert storage.get_monitor(first_monitor.id, user_id=second_user.id) is None
+    assert storage.history(first_monitor.id, user_id=second_user.id) == []
+
+
+def test_claims_legacy_data_only_for_explicit_email(tmp_path: Path) -> None:
+    storage = repository(tmp_path)
+    legacy_monitor = storage.create_monitor(settings())
+    user = storage.create_user(
+        name="Responsável legado",
+        email="responsavel@example.com",
+        password_hash=hash_password("senha-segura-123"),
+    )
+
+    rejected = storage.claim_legacy_data(
+        user.id,
+        user.email,
+        "outra-pessoa@example.com",
+    )
+    accepted = storage.claim_legacy_data(
+        user.id,
+        user.email,
+        "responsavel@example.com",
+    )
+
+    assert rejected is False
+    assert accepted is True
+    assert storage.get_monitor(legacy_monitor.id) is None
+    assert storage.get_monitor(legacy_monitor.id, user_id=user.id) is not None
