@@ -95,6 +95,26 @@ async function fetchJson(url, options = {}) {
 async function logout() {
   elements.logoutButton.disabled = true;
   try {
+    const browserSubscription = pushRegistration
+      ? await pushRegistration.pushManager.getSubscription()
+      : null;
+    if (browserSubscription) {
+      try {
+        try {
+          await fetchJson("/api/push/unsubscribe", {
+            method: "POST",
+            body: JSON.stringify({
+              device_id: pushDeviceId,
+              endpoint: browserSubscription.endpoint,
+            }),
+          });
+        } finally {
+          await browserSubscription.unsubscribe();
+        }
+      } catch (_error) {
+        // O logout da conta deve continuar mesmo se o provedor de Push estiver indisponível.
+      }
+    }
     await fetchJson("/api/auth/logout", { method: "POST" });
     window.location.assign("/login");
   } catch (error) {
