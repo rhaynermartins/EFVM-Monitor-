@@ -283,6 +283,7 @@ class MonitorService:
             "passengers": settings.passengers,
             "check_interval_seconds": settings.check_interval_seconds,
             "whatsapp_enabled": settings.whatsapp_enabled,
+            "sms_enabled": settings.sms_enabled,
         }
 
     @staticmethod
@@ -295,6 +296,7 @@ class MonitorService:
             "passengers": monitor.passengers,
             "check_interval_seconds": monitor.interval_seconds,
             "whatsapp_enabled": monitor.whatsapp_enabled,
+            "sms_enabled": monitor.sms_enabled,
         }
 
     @staticmethod
