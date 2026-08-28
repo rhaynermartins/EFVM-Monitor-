@@ -25,6 +25,7 @@ from efvm_monitor.cli import _configure_logging
 from efvm_monitor.config import ConfigurationError, Settings
 from efvm_monitor.database import MonitoringRepository, PersistedMonitor
 from efvm_monitor.monitor import MonitorAlreadyRunning, MonitorService
+from efvm_monitor.notifier import NotificationService
 
 LOGGER = logging.getLogger(__name__)
 PACKAGE_DIRECTORY = Path(__file__).parent
@@ -38,6 +39,7 @@ class MonitoringRequest(BaseModel):
     travel_class: Literal["Econômica", "Executiva"]
     passengers: Literal[1] = 1
     interval_seconds: int = Field(default=300, ge=60, le=86_400)
+    whatsapp_enabled: bool = False
 
 
 class CatalogCache:
@@ -74,6 +76,9 @@ def _settings_for_query(
     travel_date: date,
     travel_class: str,
     interval_seconds: int,
+    whatsapp_enabled: bool = False,
+    origin_label: str | None = None,
+    destination_label: str | None = None,
 ) -> Settings:
     return Settings.for_query(
         origin=origin,
@@ -89,6 +94,9 @@ def _settings_for_query(
         ),
         railway_code=os.getenv("EFVM_RAILWAY_CODE", "03"),
         alert_webhook_url=os.getenv("ALERT_WEBHOOK_URL"),
+        whatsapp_enabled=whatsapp_enabled,
+        origin_label=origin_label,
+        destination_label=destination_label,
     )
 
 
@@ -109,13 +117,20 @@ def create_app(
     monitor: MonitorService | None = None,
     repository: MonitoringRepository | None = None,
     catalog_provider: Callable[[], dict[str, Any]] | None = None,
+    notification_service: NotificationService | None = None,
 ) -> FastAPI:
     storage = repository
+    notifications = notification_service or NotificationService(repository=storage)
     if monitor is None:
         storage = storage or MonitoringRepository(
             os.getenv("EFVM_DATABASE_PATH", "data/efvm-monitor.db")
         )
-        monitor_service = MonitorService(repository=storage)
+        if notification_service is None:
+            notifications = NotificationService(repository=storage)
+        monitor_service = MonitorService(
+            repository=storage,
+            notifier=notifications.notify,
+        )
     else:
         monitor_service = monitor
     provide_catalog = catalog_provider or CatalogCache().get
@@ -139,7 +154,7 @@ def create_app(
     application = FastAPI(
         title="EFVM Monitor",
         description="Interface local de consulta de disponibilidade, sem compra de passagem.",
-        version="0.3.0",
+        version="0.4.0",
         lifespan=lifespan,
     )
     application.mount(
@@ -158,6 +173,7 @@ def create_app(
                 "official_portal_url": (
                     "https://tremdepassageiros.vale.com/sgpweb/portal/index.html#/home"
                 ),
+                "whatsapp_configured": notifications.whatsapp_configured,
             },
         )
 
@@ -175,12 +191,16 @@ def create_app(
     @application.post("/api/monitoramento", status_code=status.HTTP_202_ACCEPTED)
     def start_monitoring(payload: MonitoringRequest) -> dict[str, Any]:
         try:
+            labels = _station_labels(provide_catalog, payload.origin, payload.destination)
             settings = _settings_for_query(
                 origin=payload.origin,
                 destination=payload.destination,
                 travel_date=payload.travel_date,
                 travel_class=payload.travel_class,
                 interval_seconds=payload.interval_seconds,
+                whatsapp_enabled=payload.whatsapp_enabled,
+                origin_label=labels[0],
+                destination_label=labels[1],
             )
             return monitor_service.start(settings).to_dict()
         except ConfigurationError as exc:
@@ -207,6 +227,20 @@ def create_app(
         return monitor_service.stop().to_dict()
 
     return application
+
+
+def _station_labels(
+    catalog_provider: Callable[[], dict[str, Any]],
+    origin: str,
+    destination: str,
+) -> tuple[str, str]:
+    try:
+        stations = catalog_provider().get("stations", [])
+        names = {str(station["id"]): str(station["name"]) for station in stations}
+    except (httpx.HTTPError, PortalError, ConfigurationError, KeyError, TypeError, ValueError):
+        LOGGER.warning("Não foi possível resolver os nomes das estações para o alerta.")
+        return origin, destination
+    return names.get(origin, origin), names.get(destination, destination)
 
 
 app = create_app()
