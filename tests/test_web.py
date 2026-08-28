@@ -34,7 +34,8 @@ class StubMonitor:
         self.started_with: Settings | None = None
         self.was_shutdown = False
 
-    def start(self, settings: Settings) -> MonitorSnapshot:
+    def start(self, settings: Settings, user_id: int = 1) -> MonitorSnapshot:
+        assert user_id == 1
         self.started_with = settings
         self.current = MonitorSnapshot(
             running=True,
@@ -75,8 +76,13 @@ class PersistentFakeClient:
 @pytest.fixture
 def web_client() -> Iterator[tuple[TestClient, StubMonitor]]:
     monitor = StubMonitor()
-    application = create_app(monitor=monitor, catalog_provider=lambda: CATALOG)
+    application = create_app(
+        monitor=monitor,
+        catalog_provider=lambda: CATALOG,
+        authentication_enabled=False,
+    )
     with TestClient(application) as client:
+        client.headers["X-CSRF-Token"] = "test-csrf-token"
         yield client, monitor
 
 
@@ -197,6 +203,7 @@ def persistent_app(database_path: Path) -> tuple[Any, MonitoringRepository]:
         monitor=service,
         repository=storage,
         catalog_provider=lambda: CATALOG,
+        authentication_enabled=False,
     )
     return application, storage
 
@@ -206,6 +213,7 @@ def test_recovers_active_monitor_and_history_after_restart(tmp_path: Path) -> No
     first_app, first_storage = persistent_app(database_path)
 
     with TestClient(first_app) as first_client:
+        first_client.headers["X-CSRF-Token"] = "test-csrf-token"
         response = first_client.post("/api/monitoramento", json=valid_payload())
         assert response.status_code == 202
         first_state = wait_for_api_status(first_client, "SEM_VAGA")
