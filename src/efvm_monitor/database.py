@@ -430,7 +430,7 @@ class MonitoringRepository:
                 WHERE monitoring_id = ?
                   AND EXISTS (
                       SELECT 1 FROM monitoring_jobs
-                      WHERE id = ? AND user_id = ? AND removed_at IS NULL
+                      WHERE id = ? AND user_id = ?
                   )
                 ORDER BY checked_at DESC, id DESC
                 LIMIT ?
