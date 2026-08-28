@@ -8,6 +8,7 @@ const elements = {
   travelClass: document.querySelector("#travel-class"),
   passengers: document.querySelector("#passengers"),
   interval: document.querySelector("#interval"),
+  smsAlerts: document.querySelector("#sms-alerts"),
   whatsappAlerts: document.querySelector("#whatsapp-alerts"),
   notifications: document.querySelector("#browser-notifications"),
   startButton: document.querySelector("#start-button"),
@@ -126,6 +127,7 @@ function setControls(running) {
   });
   elements.whatsappAlerts.disabled =
     running || elements.whatsappAlerts.dataset.configured !== "true";
+  elements.smsAlerts.disabled = running || elements.smsAlerts.dataset.configured !== "true";
   elements.notifications.disabled = running || !catalogReady;
   elements.passengers.disabled = true;
   elements.startButton.disabled = running || !catalogReady;
@@ -166,6 +168,9 @@ function applyQueryToForm(query) {
   if (elements.whatsappAlerts.dataset.configured === "true") {
     elements.whatsappAlerts.checked = Boolean(query.whatsapp_enabled);
   }
+  if (elements.smsAlerts.dataset.configured === "true") {
+    elements.smsAlerts.checked = Boolean(query.sms_enabled);
+  }
   const classOption = Array.from(elements.travelClass.options).find(
     (item) => item.text === query.travel_class,
   );
@@ -181,7 +186,8 @@ function renderQuery(query) {
   elements.summaryDateClass.textContent = `${formatTravelDate(query.travel_date)} · ${query.travel_class} · 1 passageiro`;
   elements.summaryInterval.textContent = `${query.check_interval_seconds} segundos`;
   const alertChannels = [];
-  if (query.whatsapp_enabled) alertChannels.push("WhatsApp (principal)");
+  if (query.sms_enabled) alertChannels.push("SMS (principal)");
+  if (query.whatsapp_enabled) alertChannels.push("WhatsApp");
   if (elements.notifications.checked) alertChannels.push("Navegador");
   elements.summaryAlerts.textContent = alertChannels.join(" + ") || "Nenhum canal ativado";
 }
@@ -273,6 +279,7 @@ async function startMonitoring(event) {
         passengers: 1,
         interval_seconds: Number(elements.interval.value),
         whatsapp_enabled: elements.whatsappAlerts.checked,
+        sms_enabled: elements.smsAlerts.checked,
       }),
     });
     renderState(state);
