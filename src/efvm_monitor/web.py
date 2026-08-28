@@ -231,7 +231,7 @@ def create_app(
     application = FastAPI(
         title="EFVM Monitor",
         description="Interface local de consulta de disponibilidade, sem compra de passagem.",
-        version="0.4.2",
+        version="0.6.0",
         lifespan=lifespan,
     )
 
