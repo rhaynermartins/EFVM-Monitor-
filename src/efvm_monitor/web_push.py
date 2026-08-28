@@ -156,9 +156,12 @@ class WebPushNotifier:
             external_message_id=f"{successes}/{len(subscriptions)} dispositivo(s)",
         )
 
-    def send_test(self, device_id: str) -> int:
+    def send_test(self, device_id: str, user_id: int) -> int:
         self.config.validate()
-        subscription = self.repository.get_push_subscription_for_device(device_id)
+        subscription = self.repository.get_push_subscription_for_device(
+            device_id,
+            user_id=user_id,
+        )
         if subscription is None:
             raise WebPushSendError("Este dispositivo não possui inscrição ativa.", 0)
         payload = {
