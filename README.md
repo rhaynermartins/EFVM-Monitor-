@@ -281,6 +281,7 @@ src/efvm_monitor/
 └── templates/   # página HTML
 tests/
 ├── test_checker.py
+├── test_cli.py
 ├── test_database.py
 ├── test_monitor.py
 ├── test_notifier.py
