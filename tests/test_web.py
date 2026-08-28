@@ -88,6 +88,7 @@ def valid_payload() -> dict[str, Any]:
         "travel_class": "Econômica",
         "passengers": 1,
         "interval_seconds": 300,
+        "whatsapp_enabled": False,
     }
 
 
@@ -103,6 +104,8 @@ def test_home_renders_complete_form(web_client: tuple[TestClient, StubMonitor]) 
     assert 'id="travel-date"' in response.text
     assert 'id="travel-class"' in response.text
     assert 'id="passengers"' in response.text
+    assert 'id="whatsapp-alerts"' in response.text
+    assert response.text.index("Configure a viagem") < response.text.index("Acompanhe o estado")
 
 
 def test_catalog_returns_stations_and_classes(web_client: tuple[TestClient, StubMonitor]) -> None:
@@ -137,6 +140,8 @@ def test_start_status_and_stop_monitoring(web_client: tuple[TestClient, StubMoni
     assert monitor.started_with is not None
     assert monitor.started_with.travel_class == "Econômica"
     assert monitor.started_with.passengers == 1
+    assert monitor.started_with.whatsapp_enabled is False
+    assert monitor.started_with.origin_label == "Belo Horizonte"
 
 
 def test_rejects_same_origin_and_destination(web_client: tuple[TestClient, StubMonitor]) -> None:
