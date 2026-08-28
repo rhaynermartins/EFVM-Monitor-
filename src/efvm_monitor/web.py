@@ -24,7 +24,8 @@ from efvm_monitor.checker import EFVMClient, PortalError
 from efvm_monitor.cli import _configure_logging
 from efvm_monitor.config import ConfigurationError, Settings
 from efvm_monitor.database import MonitoringRepository, PersistedMonitor
-from efvm_monitor.monitor import MonitorAlreadyRunning, MonitorService
+from efvm_monitor.manager import MonitoringManager, MonitoringNotFound
+from efvm_monitor.monitor import MonitorAlreadyRunning, MonitorService, MonitorSnapshot
 from efvm_monitor.notifier import NotificationService
 from efvm_monitor.web_push import WebPushConfigurationError, WebPushSendError
 
@@ -147,41 +148,61 @@ def _settings_from_monitor(monitor: PersistedMonitor) -> Settings:
 def create_app(
     *,
     monitor: MonitorService | None = None,
+    manager: MonitoringManager | None = None,
     repository: MonitoringRepository | None = None,
     catalog_provider: Callable[[], dict[str, Any]] | None = None,
     notification_service: NotificationService | None = None,
 ) -> FastAPI:
-    storage = repository
-    notifications = notification_service or NotificationService(repository=storage)
-    if monitor is None:
-        storage = storage or MonitoringRepository(
+    storage = repository or (manager.repository if manager is not None else None)
+    if storage is None and monitor is None:
+        storage = MonitoringRepository(
             os.getenv("EFVM_DATABASE_PATH", "data/efvm-monitor.db")
         )
-        if notification_service is None:
-            notifications = NotificationService(repository=storage)
-        monitor_service = MonitorService(
-            repository=storage,
+    notifications = notification_service or NotificationService(repository=storage)
+    manager_service = manager
+    monitor_service = monitor
+    if manager_service is None and monitor_service is None:
+        if storage is None:
+            raise RuntimeError("A persistência é obrigatória para múltiplos monitoramentos.")
+        manager_service = MonitoringManager(
+            storage,
             notifier=notifications.notify,
         )
-    else:
-        monitor_service = monitor
     provide_catalog = catalog_provider or CatalogCache().get
+
+    def snapshots() -> list[MonitorSnapshot]:
+        if manager_service is not None:
+            return manager_service.list()
+        if monitor_service is None:
+            return []
+        snapshot = monitor_service.snapshot()
+        return [snapshot] if snapshot.monitoring_id is not None or snapshot.query else []
+
+    def latest_snapshot() -> MonitorSnapshot:
+        current = snapshots()
+        return current[0] if current else MonitorSnapshot()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         if storage is not None:
             storage.initialize()
-            saved_monitor = storage.latest_monitor()
-            if saved_monitor is not None:
+            if manager_service is not None:
+                manager_service.restore_all(_settings_from_monitor)
+            else:
+                saved_monitor = storage.latest_monitor()
                 saved_settings: Settings | None = None
-                if saved_monitor.active:
+                if saved_monitor is not None and saved_monitor.active:
                     try:
                         saved_settings = _settings_from_monitor(saved_monitor)
                     except ConfigurationError as exc:
                         LOGGER.error("Monitor salvo não pôde ser retomado: %s", exc)
-                monitor_service.restore(saved_monitor, saved_settings)
+                if saved_monitor is not None and monitor_service is not None:
+                    monitor_service.restore(saved_monitor, saved_settings)
         yield
-        monitor_service.shutdown()
+        if manager_service is not None:
+            manager_service.shutdown()
+        elif monitor_service is not None:
+            monitor_service.shutdown()
 
     application = FastAPI(
         title="EFVM Monitor",
@@ -268,10 +289,16 @@ def create_app(
             auth=payload.keys.auth,
             user_agent=request.headers.get("user-agent"),
         )
-        monitoring_id = monitor_service.snapshot().monitoring_id
-        if monitoring_id is not None:
+        monitoring_ids = [
+            item.monitoring_id for item in snapshots() if item.monitoring_id is not None
+        ]
+        for monitoring_id in monitoring_ids:
             storage.link_push_subscription(monitoring_id, subscription.id)
-        return {"subscribed": True, "linked_monitoring_id": monitoring_id}
+        return {
+            "subscribed": True,
+            "linked_monitoring_id": monitoring_ids[0] if monitoring_ids else None,
+            "linked_monitoring_ids": monitoring_ids,
+        }
 
     @application.post("/api/push/unsubscribe")
     def unsubscribe_push(payload: PushUnsubscribeRequest) -> dict[str, Any]:
@@ -310,6 +337,9 @@ def create_app(
 
     @application.post("/api/monitoramento", status_code=status.HTTP_202_ACCEPTED)
     def start_monitoring(payload: MonitoringRequest) -> dict[str, Any]:
+        return _create_monitoring(payload)
+
+    def _create_monitoring(payload: MonitoringRequest) -> dict[str, Any]:
         try:
             labels = _station_labels(provide_catalog, payload.origin, payload.destination)
             settings = _settings_for_query(
@@ -323,7 +353,12 @@ def create_app(
                 destination_label=labels[1],
                 sms_enabled=payload.sms_enabled,
             )
-            snapshot = monitor_service.start(settings)
+            if manager_service is not None:
+                snapshot = manager_service.create(settings)
+            elif monitor_service is not None:
+                snapshot = monitor_service.start(settings)
+            else:
+                raise RuntimeError("Serviço de monitoramento indisponível.")
             if storage is not None and payload.push_device_id and snapshot.monitoring_id:
                 subscription = storage.get_push_subscription_for_device(payload.push_device_id)
                 if subscription is not None:
@@ -336,23 +371,111 @@ def create_app(
 
     @application.get("/api/monitoramento")
     def monitoring_status() -> dict[str, Any]:
-        return monitor_service.snapshot().to_dict()
+        return latest_snapshot().to_dict()
 
     @application.get("/api/monitoramento/historico")
     def monitoring_history(
         limit: int = Query(default=50, ge=1, le=1_000),
     ) -> dict[str, Any]:
-        snapshot = monitor_service.snapshot()
+        snapshot = latest_snapshot()
         return {
             "monitoring_id": snapshot.monitoring_id,
-            "items": monitor_service.history(limit),
+            "items": (
+                manager_service.history(snapshot.monitoring_id, limit)
+                if manager_service is not None and snapshot.monitoring_id is not None
+                else monitor_service.history(limit) if monitor_service is not None else []
+            ),
         }
 
     @application.delete("/api/monitoramento")
     def stop_monitoring() -> dict[str, Any]:
-        return monitor_service.stop().to_dict()
+        snapshot = latest_snapshot()
+        if manager_service is not None and snapshot.monitoring_id is not None:
+            return manager_service.pause(snapshot.monitoring_id).to_dict()
+        if monitor_service is not None:
+            return monitor_service.stop().to_dict()
+        return snapshot.to_dict()
+
+    @application.post("/api/monitoramentos", status_code=status.HTTP_202_ACCEPTED)
+    def create_monitoring(payload: MonitoringRequest) -> dict[str, Any]:
+        return _create_monitoring(payload)
+
+    @application.get("/api/monitoramentos")
+    def list_monitorings() -> dict[str, Any]:
+        return {"items": [item.to_dict() for item in snapshots()]}
+
+    @application.get("/api/monitoramentos/{monitoring_id}")
+    def get_monitoring(monitoring_id: int) -> dict[str, Any]:
+        return _manager_snapshot(manager_service, monitoring_id).to_dict()
+
+    @application.post("/api/monitoramentos/{monitoring_id}/pausar")
+    def pause_monitoring(monitoring_id: int) -> dict[str, Any]:
+        active_manager = _require_manager(manager_service)
+        try:
+            return active_manager.pause(monitoring_id).to_dict()
+        except MonitoringNotFound as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    @application.post("/api/monitoramentos/{monitoring_id}/retomar")
+    def resume_monitoring(monitoring_id: int) -> dict[str, Any]:
+        active_manager = _require_manager(manager_service)
+        if storage is None:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
+        persisted = storage.get_monitor(monitoring_id)
+        if persisted is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Monitoramento {monitoring_id} não encontrado.",
+            )
+        try:
+            return active_manager.resume(
+                monitoring_id,
+                _settings_from_monitor(persisted),
+            ).to_dict()
+        except ConfigurationError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        except MonitorAlreadyRunning as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    @application.delete("/api/monitoramentos/{monitoring_id}")
+    def remove_monitoring(monitoring_id: int) -> dict[str, Any]:
+        active_manager = _require_manager(manager_service)
+        try:
+            active_manager.remove(monitoring_id)
+        except MonitoringNotFound as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        return {"removed": True, "monitoring_id": monitoring_id}
+
+    @application.get("/api/monitoramentos/{monitoring_id}/historico")
+    def monitoring_history_by_id(
+        monitoring_id: int,
+        limit: int = Query(default=50, ge=1, le=1_000),
+    ) -> dict[str, Any]:
+        active_manager = _require_manager(manager_service)
+        try:
+            items = active_manager.history(monitoring_id, limit)
+        except MonitoringNotFound as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        return {"monitoring_id": monitoring_id, "items": items}
 
     return application
+
+
+def _require_manager(manager: MonitoringManager | None) -> MonitoringManager:
+    if manager is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Gerenciador de múltiplos monitoramentos indisponível.",
+        )
+    return manager
+
+
+def _manager_snapshot(manager: MonitoringManager | None, monitoring_id: int) -> MonitorSnapshot:
+    active_manager = _require_manager(manager)
+    try:
+        return active_manager.snapshot(monitoring_id)
+    except MonitoringNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 def _station_labels(
