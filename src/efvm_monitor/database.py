@@ -43,6 +43,7 @@ class PersistedMonitor:
     created_at: str
     updated_at: str
     whatsapp_enabled: bool = False
+    sms_enabled: bool = False
     origin_label: str | None = None
     destination_label: str | None = None
 
@@ -79,6 +80,7 @@ class PersistedMonitor:
             railway_code=railway_code,
             alert_webhook_url=alert_webhook_url,
             whatsapp_enabled=self.whatsapp_enabled,
+            sms_enabled=self.sms_enabled,
             origin_label=self.origin_label,
             destination_label=self.destination_label,
         )
@@ -110,6 +112,9 @@ class NotificationDelivery:
     external_message_id: str | None
     created_at: str
     updated_at: str
+    provider: str | None = None
+    recipient_masked: str | None = None
+    event: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -193,6 +198,14 @@ class MonitoringRepository:
                     now,
                     now,
                 ),
+            )
+            connection.execute(
+                """
+                INSERT INTO monitoring_sms_preferences (
+                    monitoring_id, sms_enabled, created_at, updated_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (monitoring_id, int(settings.sms_enabled), now, now),
             )
         monitor = self.get_monitor(monitoring_id)
         if monitor is None:
@@ -320,6 +333,9 @@ class MonitoringRepository:
         result: AvailabilityStatus,
         channel: str,
         message: str,
+        provider: str | None = None,
+        recipient_masked: str | None = None,
+        event: str = "DISPONIBILIDADE_ENCONTRADA",
     ) -> NotificationDelivery | None:
         """Reserva uma entrega única antes do envio para evitar alertas duplicados."""
         now = self._now()
@@ -346,12 +362,26 @@ class MonitoringRepository:
             if cursor.rowcount == 0:
                 return None
             delivery_id = int(cursor.lastrowid)
+            if provider is not None:
+                connection.execute(
+                    """
+                    INSERT INTO notification_delivery_metadata (
+                        delivery_id, provider, recipient_masked, event
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (delivery_id, provider, recipient_masked, event),
+                )
         return self.get_notification(delivery_id)
 
     def get_notification(self, delivery_id: int) -> NotificationDelivery | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT * FROM notification_deliveries WHERE id = ?",
+                """
+                SELECT n.*, md.provider, md.recipient_masked, md.event
+                FROM notification_deliveries AS n
+                LEFT JOIN notification_delivery_metadata AS md ON md.delivery_id = n.id
+                WHERE n.id = ?
+                """,
                 (delivery_id,),
             ).fetchone()
         return self._notification_from_row(row) if row is not None else None
@@ -394,9 +424,11 @@ class MonitoringRepository:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT * FROM notification_deliveries
-                WHERE monitoring_id = ?
-                ORDER BY created_at DESC, id DESC
+                SELECT n.*, md.provider, md.recipient_masked, md.event
+                FROM notification_deliveries AS n
+                LEFT JOIN notification_delivery_metadata AS md ON md.delivery_id = n.id
+                WHERE n.monitoring_id = ?
+                ORDER BY n.created_at DESC, n.id DESC
                 LIMIT ?
                 """,
                 (monitoring_id, safe_limit),
@@ -436,6 +468,7 @@ class MonitoringRepository:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             whatsapp_enabled=bool(row["whatsapp_enabled"]),
+            sms_enabled=bool(row["sms_enabled"]),
             origin_label=row["origin_label"],
             destination_label=row["destination_label"],
         )
@@ -451,11 +484,14 @@ class MonitoringRepository:
         return """
             SELECT m.*,
                    COALESCE(p.whatsapp_enabled, 0) AS whatsapp_enabled,
+                   COALESCE(s.sms_enabled, 0) AS sms_enabled,
                    p.origin_label,
                    p.destination_label
             FROM monitoring_jobs AS m
             LEFT JOIN monitoring_notification_preferences AS p
                 ON p.monitoring_id = m.id
+            LEFT JOIN monitoring_sms_preferences AS s
+                ON s.monitoring_id = m.id
         """
 
     @staticmethod
