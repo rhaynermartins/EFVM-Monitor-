@@ -193,3 +193,39 @@ def test_isolates_web_push_devices_between_users(isolated_client: TestClient) ->
     assert foreign_status.json()["subscribed"] is False
     assert foreign_test.status_code == 502
     assert own_status.json()["subscribed"] is True
+
+
+def test_transfers_reconfirmed_push_endpoint_without_cross_account_access(
+    isolated_client: TestClient,
+) -> None:
+    client = isolated_client
+    account_a = create_account(client, "Usuário A", "shared-a@example.com")
+    account_b = create_account(client, "Usuário B", "shared-b@example.com")
+    shared_device = subscription("shared-device-1234", "shared-subscription")
+
+    headers_a = use_account(client, account_a)
+    first = client.post(
+        "/api/push/subscribe",
+        json=shared_device,
+        headers=headers_a,
+    )
+    headers_b = use_account(client, account_b)
+    transferred = client.post(
+        "/api/push/subscribe",
+        json=shared_device,
+        headers=headers_b,
+    )
+    current_owner = client.get(
+        "/api/push/status",
+        params={"device_id": shared_device["device_id"]},
+    )
+    use_account(client, account_a)
+    previous_owner = client.get(
+        "/api/push/status",
+        params={"device_id": shared_device["device_id"]},
+    )
+
+    assert first.status_code == 201
+    assert transferred.status_code == 201
+    assert current_owner.json()["subscribed"] is True
+    assert previous_owner.json()["subscribed"] is False
