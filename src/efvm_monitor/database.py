@@ -11,8 +11,16 @@ from enum import IntEnum
 from pathlib import Path
 from typing import Any
 
+from efvm_monitor.auth import (
+    AuthenticatedSession,
+    SessionCredentials,
+    normalize_email,
+    token_digest,
+)
 from efvm_monitor.checker import AvailabilityStatus
 from efvm_monitor.config import Settings
+
+LEGACY_USER_ID = 1
 
 
 class MonitorStatus(IntEnum):
@@ -29,6 +37,7 @@ class NotificationStatus(IntEnum):
 @dataclass(frozen=True, slots=True)
 class PersistedMonitor:
     id: int
+    user_id: int
     origin: str
     destination: str
     travel_date: date
@@ -127,6 +136,7 @@ class NotificationDelivery:
 @dataclass(frozen=True, slots=True)
 class PushSubscription:
     id: int
+    user_id: int
     device_id: str
     endpoint: str
     p256dh: str
@@ -143,6 +153,25 @@ class PushSubscription:
             "endpoint": self.endpoint,
             "keys": {"p256dh": self.p256dh, "auth": self.auth},
         }
+
+
+@dataclass(frozen=True, slots=True)
+class UserRecord:
+    id: int
+    name: str
+    email: str
+    password_hash: str | None
+    status: int
+    is_legacy: bool
+    created_at: str
+    updated_at: str
+
+    @property
+    def active(self) -> bool:
+        return self.status == 1 and not self.is_legacy
+
+    def to_public_dict(self) -> dict[str, str | int]:
+        return {"id": self.id, "name": self.name, "email": self.email}
 
 
 class MonitoringRepository:
@@ -182,17 +211,19 @@ class MonitoringRepository:
         self,
         settings: Settings,
         status: MonitorStatus = MonitorStatus.ACTIVE,
+        user_id: int = LEGACY_USER_ID,
     ) -> PersistedMonitor:
         now = self._now()
         with self._connect() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO monitoring_jobs (
-                    origin, destination, travel_date, travel_class, passengers,
+                    user_id, origin, destination, travel_date, travel_class, passengers,
                     interval_seconds, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    user_id,
                     settings.origin,
                     settings.destination,
                     settings.travel_date.isoformat(),
@@ -229,12 +260,27 @@ class MonitoringRepository:
                 """,
                 (monitoring_id, int(settings.sms_enabled), now, now),
             )
-        monitor = self.get_monitor(monitoring_id)
+        monitor = self.get_monitor(monitoring_id, user_id=user_id)
         if monitor is None:
             raise RuntimeError("O monitoramento criado não foi encontrado no banco local.")
         return monitor
 
-    def get_monitor(self, monitoring_id: int) -> PersistedMonitor | None:
+    def get_monitor(
+        self,
+        monitoring_id: int,
+        user_id: int = LEGACY_USER_ID,
+    ) -> PersistedMonitor | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                f"""
+                {self._monitor_select()}
+                WHERE m.id = ? AND m.user_id = ? AND m.removed_at IS NULL
+                """,
+                (monitoring_id, user_id),
+            ).fetchone()
+        return self._monitor_from_row(row) if row is not None else None
+
+    def get_monitor_internal(self, monitoring_id: int) -> PersistedMonitor | None:
         with self._connect() as connection:
             row = connection.execute(
                 f"{self._monitor_select()} WHERE m.id = ? AND m.removed_at IS NULL",
@@ -242,32 +288,45 @@ class MonitoringRepository:
             ).fetchone()
         return self._monitor_from_row(row) if row is not None else None
 
-    def latest_active_monitor(self) -> PersistedMonitor | None:
+    def latest_active_monitor(self, user_id: int = LEGACY_USER_ID) -> PersistedMonitor | None:
         with self._connect() as connection:
             row = connection.execute(
                 f"""
                 {self._monitor_select()}
-                WHERE m.status = ? AND m.removed_at IS NULL
+                WHERE m.status = ? AND m.user_id = ? AND m.removed_at IS NULL
                 ORDER BY m.updated_at DESC, m.id DESC
                 LIMIT 1
                 """,
-                (int(MonitorStatus.ACTIVE),),
+                (int(MonitorStatus.ACTIVE), user_id),
             ).fetchone()
         return self._monitor_from_row(row) if row is not None else None
 
-    def latest_monitor(self) -> PersistedMonitor | None:
+    def latest_monitor(self, user_id: int = LEGACY_USER_ID) -> PersistedMonitor | None:
         with self._connect() as connection:
             row = connection.execute(
                 f"""
                 {self._monitor_select()}
-                WHERE m.removed_at IS NULL
+                WHERE m.user_id = ? AND m.removed_at IS NULL
                 ORDER BY m.updated_at DESC, m.id DESC
                 LIMIT 1
-                """
+                """,
+                (user_id,),
             ).fetchone()
         return self._monitor_from_row(row) if row is not None else None
 
-    def list_monitors(self) -> list[PersistedMonitor]:
+    def list_monitors(self, user_id: int = LEGACY_USER_ID) -> list[PersistedMonitor]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                {self._monitor_select()}
+                WHERE m.user_id = ? AND m.removed_at IS NULL
+                ORDER BY m.created_at DESC, m.id DESC
+                """,
+                (user_id,),
+            ).fetchall()
+        return [self._monitor_from_row(row) for row in rows]
+
+    def list_all_monitors(self) -> list[PersistedMonitor]:
         with self._connect() as connection:
             rows = connection.execute(
                 f"""
@@ -356,7 +415,12 @@ class MonitoringRepository:
                 ),
             )
 
-    def history(self, monitoring_id: int, limit: int = 100) -> list[HistoryEntry]:
+    def history(
+        self,
+        monitoring_id: int,
+        limit: int = 100,
+        user_id: int = LEGACY_USER_ID,
+    ) -> list[HistoryEntry]:
         safe_limit = max(1, min(limit, 1_000))
         with self._connect() as connection:
             rows = connection.execute(
@@ -364,10 +428,14 @@ class MonitoringRepository:
                 SELECT id, monitoring_id, result, message, checked_at
                 FROM check_history
                 WHERE monitoring_id = ?
+                  AND EXISTS (
+                      SELECT 1 FROM monitoring_jobs
+                      WHERE id = ? AND user_id = ? AND removed_at IS NULL
+                  )
                 ORDER BY checked_at DESC, id DESC
                 LIMIT ?
                 """,
-                (monitoring_id, safe_limit),
+                (monitoring_id, monitoring_id, user_id, safe_limit),
             ).fetchall()
         return [HistoryEntry(**dict(row)) for row in rows]
 
@@ -484,6 +552,7 @@ class MonitoringRepository:
     def upsert_push_subscription(
         self,
         *,
+        user_id: int = LEGACY_USER_ID,
         device_id: str,
         endpoint: str,
         p256dh: str,
@@ -495,40 +564,44 @@ class MonitoringRepository:
             connection.execute(
                 """
                 INSERT INTO push_subscriptions (
-                    device_id, endpoint, p256dh, auth, user_agent, active,
+                    user_id, device_id, endpoint, p256dh, auth, user_agent, active,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
                 ON CONFLICT(endpoint) DO UPDATE SET
+                    user_id = excluded.user_id,
                     device_id = excluded.device_id,
                     p256dh = excluded.p256dh,
                     auth = excluded.auth,
                     user_agent = excluded.user_agent,
                     active = 1,
                     updated_at = excluded.updated_at
+                WHERE push_subscriptions.user_id = excluded.user_id
+                   OR push_subscriptions.active = 0
                 """,
-                (device_id, endpoint, p256dh, auth, user_agent, now, now),
+                (user_id, device_id, endpoint, p256dh, auth, user_agent, now, now),
             )
             row = connection.execute(
-                "SELECT * FROM push_subscriptions WHERE endpoint = ?",
-                (endpoint,),
+                "SELECT * FROM push_subscriptions WHERE endpoint = ? AND user_id = ?",
+                (endpoint, user_id),
             ).fetchone()
         if row is None:
-            raise RuntimeError("A inscrição Web Push não foi salva.")
+            raise PermissionError("Esta inscrição Web Push pertence a outro usuário.")
         return self._push_subscription_from_row(row)
 
     def get_push_subscription_for_device(
         self,
         device_id: str,
+        user_id: int = LEGACY_USER_ID,
     ) -> PushSubscription | None:
         with self._connect() as connection:
             row = connection.execute(
                 """
                 SELECT * FROM push_subscriptions
-                WHERE device_id = ? AND active = 1
+                WHERE device_id = ? AND user_id = ? AND active = 1
                 ORDER BY updated_at DESC, id DESC
                 LIMIT 1
                 """,
-                (device_id,),
+                (device_id, user_id),
             ).fetchone()
         return self._push_subscription_from_row(row) if row is not None else None
 
@@ -553,20 +626,40 @@ class MonitoringRepository:
         self,
         monitoring_id: int,
         subscription_id: int,
-    ) -> None:
+        user_id: int = LEGACY_USER_ID,
+    ) -> bool:
         now = self._now()
         with self._connect() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 """
                 INSERT INTO monitoring_push_subscriptions (
                     monitoring_id, subscription_id, active, created_at, updated_at
-                ) VALUES (?, ?, 1, ?, ?)
+                )
+                SELECT ?, ?, 1, ?, ?
+                WHERE EXISTS (
+                    SELECT 1 FROM monitoring_jobs
+                    WHERE id = ? AND user_id = ? AND removed_at IS NULL
+                )
+                  AND EXISTS (
+                    SELECT 1 FROM push_subscriptions
+                    WHERE id = ? AND user_id = ? AND active = 1
+                )
                 ON CONFLICT(monitoring_id, subscription_id) DO UPDATE SET
                     active = 1,
                     updated_at = excluded.updated_at
                 """,
-                (monitoring_id, subscription_id, now, now),
+                (
+                    monitoring_id,
+                    subscription_id,
+                    now,
+                    now,
+                    monitoring_id,
+                    user_id,
+                    subscription_id,
+                    user_id,
+                ),
             )
+        return cursor.rowcount > 0
 
     def deactivate_push_subscription(self, subscription_id: int) -> None:
         now = self._now()
@@ -588,14 +681,20 @@ class MonitoringRepository:
                 (now, subscription_id),
             )
 
-    def unsubscribe_push(self, *, device_id: str, endpoint: str) -> bool:
+    def unsubscribe_push(
+        self,
+        *,
+        device_id: str,
+        endpoint: str,
+        user_id: int = LEGACY_USER_ID,
+    ) -> bool:
         with self._connect() as connection:
             row = connection.execute(
                 """
                 SELECT id FROM push_subscriptions
-                WHERE device_id = ? AND endpoint = ? AND active = 1
+                WHERE device_id = ? AND endpoint = ? AND user_id = ? AND active = 1
                 """,
-                (device_id, endpoint),
+                (device_id, endpoint, user_id),
             ).fetchone()
         if row is None:
             return False
@@ -639,6 +738,127 @@ class MonitoringRepository:
                     (failed_at, subscription_id),
                 )
 
+    def create_user(self, *, name: str, email: str, password_hash: str) -> UserRecord:
+        now = self._now()
+        clean_name = name.strip()
+        clean_email = normalize_email(email)
+        with self._connect() as connection:
+            try:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO users (
+                        name, email, password_hash, status, is_legacy, created_at, updated_at
+                    ) VALUES (?, ?, ?, 1, 0, ?, ?)
+                    """,
+                    (clean_name, clean_email, password_hash, now, now),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValueError("Já existe uma conta com este e-mail.") from exc
+            user_id = int(cursor.lastrowid)
+        user = self.get_user(user_id)
+        if user is None:
+            raise RuntimeError("A conta criada não foi encontrada.")
+        return user
+
+    def get_user(self, user_id: int) -> UserRecord | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        return self._user_from_row(row) if row is not None else None
+
+    def get_user_by_email(self, email: str) -> UserRecord | None:
+        clean_email = normalize_email(email)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM users WHERE email = ? COLLATE NOCASE",
+                (clean_email,),
+            ).fetchone()
+        return self._user_from_row(row) if row is not None else None
+
+    def create_session(
+        self,
+        user_id: int,
+        credentials: SessionCredentials,
+    ) -> AuthenticatedSession:
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO auth_sessions (
+                    user_id, token_hash, csrf_token, expires_at,
+                    last_seen_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    credentials.token_hash,
+                    credentials.csrf_token,
+                    credentials.expires_at,
+                    now,
+                    now,
+                ),
+            )
+        session = self.get_session(credentials.token)
+        if session is None:
+            raise RuntimeError("A sessão criada não foi encontrada.")
+        return session
+
+    def get_session(self, token: str) -> AuthenticatedSession | None:
+        now = self._now()
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT u.id AS user_id, u.name, u.email, s.csrf_token, s.expires_at
+                FROM auth_sessions AS s
+                INNER JOIN users AS u ON u.id = s.user_id
+                WHERE s.token_hash = ?
+                  AND s.revoked_at IS NULL
+                  AND s.expires_at > ?
+                  AND u.status = 1
+                  AND u.is_legacy = 0
+                """,
+                (token_digest(token), now),
+            ).fetchone()
+            if row is not None:
+                connection.execute(
+                    "UPDATE auth_sessions SET last_seen_at = ? WHERE token_hash = ?",
+                    (now, token_digest(token)),
+                )
+        return AuthenticatedSession(**dict(row)) if row is not None else None
+
+    def revoke_session(self, token: str) -> bool:
+        now = self._now()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE auth_sessions
+                SET revoked_at = ?
+                WHERE token_hash = ? AND revoked_at IS NULL
+                """,
+                (now, token_digest(token)),
+            )
+        return cursor.rowcount > 0
+
+    def claim_legacy_data(self, user_id: int, email: str, configured_email: str) -> bool:
+        """Transfere dados antigos somente após uma correspondência explícita de e-mail."""
+        if normalize_email(email) != normalize_email(configured_email):
+            return False
+        with self._connect() as connection:
+            legacy = connection.execute(
+                "SELECT id FROM users WHERE id = ? AND is_legacy = 1 AND status = 0",
+                (LEGACY_USER_ID,),
+            ).fetchone()
+            if legacy is None:
+                return False
+            monitors = connection.execute(
+                "UPDATE monitoring_jobs SET user_id = ? WHERE user_id = ?",
+                (user_id, LEGACY_USER_ID),
+            )
+            subscriptions = connection.execute(
+                "UPDATE push_subscriptions SET user_id = ? WHERE user_id = ?",
+                (user_id, LEGACY_USER_ID),
+            )
+        return monitors.rowcount > 0 or subscriptions.rowcount > 0
+
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.database_path, timeout=5)
@@ -658,6 +878,7 @@ class MonitoringRepository:
     def _monitor_from_row(row: sqlite3.Row) -> PersistedMonitor:
         return PersistedMonitor(
             id=row["id"],
+            user_id=row["user_id"],
             origin=row["origin"],
             destination=row["destination"],
             travel_date=date.fromisoformat(row["travel_date"]),
@@ -689,6 +910,12 @@ class MonitoringRepository:
         data = dict(row)
         data["active"] = bool(data["active"])
         return PushSubscription(**data)
+
+    @staticmethod
+    def _user_from_row(row: sqlite3.Row) -> UserRecord:
+        data = dict(row)
+        data["is_legacy"] = bool(data["is_legacy"])
+        return UserRecord(**data)
 
     @staticmethod
     def _monitor_select() -> str:
