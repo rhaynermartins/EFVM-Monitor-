@@ -5,7 +5,7 @@ from pathlib import Path
 
 from efvm_monitor.checker import AvailabilityStatus
 from efvm_monitor.config import Settings
-from efvm_monitor.database import MonitoringRepository, MonitorStatus
+from efvm_monitor.database import MonitoringRepository, MonitorStatus, NotificationStatus
 
 
 def settings() -> Settings:
@@ -16,6 +16,9 @@ def settings() -> Settings:
         travel_class="Executiva",
         passengers=1,
         check_interval_seconds=300,
+        whatsapp_enabled=True,
+        origin_label="Belo Horizonte",
+        destination_label="Pedro Nolasco",
     )
 
 
@@ -37,6 +40,8 @@ def test_initialization_is_idempotent_and_non_destructive(tmp_path: Path) -> Non
     assert recovered.origin == "7185"
     assert recovered.travel_class == "Executiva"
     assert recovered.active is True
+    assert recovered.whatsapp_enabled is True
+    assert recovered.origin_label == "Belo Horizonte"
 
     assert len(restarted.list_monitors()) == 1
 
@@ -97,3 +102,40 @@ def test_pauses_and_recovers_active_monitor(tmp_path: Path) -> None:
     assert paused is not None
     assert paused.status is MonitorStatus.PAUSED
     assert storage.latest_active_monitor() is None
+
+
+def test_records_and_deduplicates_whatsapp_delivery(tmp_path: Path) -> None:
+    storage = repository(tmp_path)
+    monitor = storage.create_monitor(settings())
+    detected_at = "2026-08-28T11:00:00-03:00"
+
+    delivery = storage.begin_notification(
+        monitor.id,
+        detected_at=detected_at,
+        result=AvailabilityStatus.TEM_VAGA,
+        channel="WHATSAPP",
+        message="Passagem encontrada.",
+    )
+    duplicate = storage.begin_notification(
+        monitor.id,
+        detected_at=detected_at,
+        result=AvailabilityStatus.TEM_VAGA,
+        channel="WHATSAPP",
+        message="Passagem encontrada novamente.",
+    )
+
+    assert delivery is not None
+    assert duplicate is None
+
+    storage.complete_notification(
+        delivery.id,
+        status=NotificationStatus.SENT,
+        attempt_count=2,
+        external_message_id="wamid.123",
+    )
+
+    history = storage.notification_history(monitor.id)
+    assert len(history) == 1
+    assert history[0].status is NotificationStatus.SENT
+    assert history[0].attempt_count == 2
+    assert history[0].external_message_id == "wamid.123"
