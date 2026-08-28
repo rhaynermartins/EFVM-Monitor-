@@ -516,6 +516,7 @@ async function startMonitoring(event) {
     });
     selectedMonitorId = state.monitoring_id;
     await refreshState();
+    setControls(false);
   } catch (error) {
     setFormError(error.message);
     setControls(false);
