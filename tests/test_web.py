@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from efvm_monitor.checker import AvailabilityResult, AvailabilityStatus
 from efvm_monitor.config import Settings
-from efvm_monitor.monitor import MonitorSnapshot
+from efvm_monitor.database import MonitoringRepository
+from efvm_monitor.monitor import MonitorService, MonitorSnapshot
 from efvm_monitor.web import create_app
 
 CATALOG = {
@@ -47,8 +51,25 @@ class StubMonitor:
     def snapshot(self) -> MonitorSnapshot:
         return self.current
 
+    def history(self, _limit: int = 100) -> list[dict[str, Any]]:
+        return []
+
     def shutdown(self) -> None:
         self.was_shutdown = True
+
+
+class PersistentFakeClient:
+    def __init__(self, _: Settings) -> None:
+        pass
+
+    def __enter__(self) -> PersistentFakeClient:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+    def check(self) -> AvailabilityResult:
+        return AvailabilityResult(AvailabilityStatus.SEM_VAGA, "Ainda não há passagens.")
 
 
 @pytest.fixture
@@ -91,6 +112,15 @@ def test_catalog_returns_stations_and_classes(web_client: tuple[TestClient, Stub
 
     assert response.status_code == 200
     assert response.json() == CATALOG
+
+
+def test_empty_history_is_available(web_client: tuple[TestClient, StubMonitor]) -> None:
+    client, _ = web_client
+
+    response = client.get("/api/monitoramento/historico")
+
+    assert response.status_code == 200
+    assert response.json() == {"monitoring_id": None, "items": []}
 
 
 def test_start_status_and_stop_monitoring(web_client: tuple[TestClient, StubMonitor]) -> None:
@@ -139,3 +169,53 @@ def test_rejects_past_travel_date(web_client: tuple[TestClient, StubMonitor]) ->
 
     assert response.status_code == 400
     assert response.json()["detail"] == "A data deve ser posterior ao dia atual."
+
+
+def wait_for_api_status(client: TestClient, expected: str) -> dict[str, Any]:
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline:
+        state = client.get("/api/monitoramento").json()
+        if state["status"] == expected:
+            return state
+        time.sleep(0.01)
+    raise AssertionError(f"A API não chegou ao estado {expected}.")
+
+
+def persistent_app(database_path: Path) -> tuple[Any, MonitoringRepository]:
+    storage = MonitoringRepository(database_path)
+    service = MonitorService(
+        client_factory=PersistentFakeClient,
+        notifier=lambda *_: None,
+        repository=storage,
+    )
+    application = create_app(
+        monitor=service,
+        repository=storage,
+        catalog_provider=lambda: CATALOG,
+    )
+    return application, storage
+
+
+def test_recovers_active_monitor_and_history_after_restart(tmp_path: Path) -> None:
+    database_path = tmp_path / "persisted.db"
+    first_app, first_storage = persistent_app(database_path)
+
+    with TestClient(first_app) as first_client:
+        response = first_client.post("/api/monitoramento", json=valid_payload())
+        assert response.status_code == 202
+        first_state = wait_for_api_status(first_client, "SEM_VAGA")
+        monitoring_id = first_state["monitoring_id"]
+        assert len(first_client.get("/api/monitoramento/historico").json()["items"]) == 1
+
+    persisted = first_storage.get_monitor(monitoring_id)
+    assert persisted is not None
+    assert persisted.active is True
+
+    restarted_app, _ = persistent_app(database_path)
+    with TestClient(restarted_app) as restarted_client:
+        restarted_state = wait_for_api_status(restarted_client, "SEM_VAGA")
+        restarted_history = restarted_client.get("/api/monitoramento/historico").json()
+
+        assert restarted_state["monitoring_id"] == monitoring_id
+        assert restarted_state["query"]["origin"] == "7185"
+        assert len(restarted_history["items"]) == 2
