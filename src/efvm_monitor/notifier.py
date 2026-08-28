@@ -338,7 +338,7 @@ class NotificationService:
     ) -> None:
         if result.status is not AvailabilityStatus.TEM_VAGA:
             return
-        if settings.sms_enabled:
+        if settings.sms_enabled and self.sms_config.enabled:
             try:
                 self._notify_sms(settings, result, monitoring_id, detected_at)
             except Exception as exc:
