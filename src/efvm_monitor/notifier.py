@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,6 +22,7 @@ from efvm_monitor.network import verified_ssl_context
 LOGGER = logging.getLogger(__name__)
 PURCHASE_URL = "https://tremdepassageiros.vale.com/sgpweb/portal/index.html#/home"
 WHATSAPP_CHANNEL = "WHATSAPP"
+SMS_CHANNEL = "SMS"
 
 
 class WhatsAppConfigurationError(ValueError):
@@ -90,6 +92,111 @@ class WhatsAppConfig:
 class SendResult:
     external_message_id: str | None
     attempts: int
+
+
+class SMSConfigurationError(ValueError):
+    """Indica configuração inválida do canal SMS."""
+
+
+@dataclass(frozen=True, slots=True)
+class SMSConfig:
+    enabled: bool
+    provider: str
+    account_sid: str
+    auth_token: str
+    from_number: str
+    recipient_phone: str
+    dry_run: bool = False
+    max_attempts: int = 3
+    timeout_seconds: float = 30.0
+
+    @classmethod
+    def from_env(cls) -> SMSConfig:
+        load_dotenv()
+        return cls(
+            enabled=_env_boolean("SMS_ENABLED", True),
+            provider=os.getenv("SMS_PROVIDER", "twilio").strip().casefold(),
+            account_sid=os.getenv("TWILIO_ACCOUNT_SID", "").strip(),
+            auth_token=os.getenv("TWILIO_AUTH_TOKEN", "").strip(),
+            from_number=os.getenv("TWILIO_FROM_NUMBER", "").strip(),
+            recipient_phone=os.getenv("SMS_RECIPIENT_PHONE", "").strip(),
+            dry_run=_env_boolean("SMS_DRY_RUN", False),
+            max_attempts=_bounded_integer("SMS_MAX_ATTEMPTS", 3, 1, 5),
+            timeout_seconds=_bounded_float("SMS_TIMEOUT_SECONDS", 30, 5, 120),
+        )
+
+    @property
+    def configured(self) -> bool:
+        if not self.enabled:
+            return False
+        try:
+            normalize_e164(self.recipient_phone)
+            if not self.dry_run:
+                normalize_e164(self.from_number)
+        except SMSConfigurationError:
+            return False
+        return self.dry_run or bool(self.account_sid and self.auth_token and self.from_number)
+
+    def validate(self) -> None:
+        if self.provider != "twilio":
+            raise SMSConfigurationError("SMS_PROVIDER deve ser twilio nesta fase.")
+        normalize_e164(self.recipient_phone)
+        if self.dry_run:
+            return
+        normalize_e164(self.from_number)
+        missing = [name for name, value in (
+            ("TWILIO_ACCOUNT_SID", self.account_sid),
+            ("TWILIO_AUTH_TOKEN", self.auth_token),
+            ("TWILIO_FROM_NUMBER", self.from_number),
+        ) if not value]
+        if missing:
+            raise SMSConfigurationError(f"Configuração SMS incompleta: {', '.join(missing)}.")
+
+
+class TwilioSMSNotifier:
+    """Provider SMS desacoplado usando a API REST oficial da Twilio."""
+
+    def __init__(self, config: SMSConfig, *, client_factory: Callable[[], Any] | None = None,
+                 sleep: Callable[[float], None] = time.sleep) -> None:
+        self.config = config
+        self._client_factory = client_factory or self._default_client
+        self._sleep = sleep
+
+    def send(self, message: str) -> SendResult:
+        self.config.validate()
+        if self.config.dry_run:
+            LOGGER.info("SMS dry-run para %s: %s", mask_phone(self.config.recipient_phone), message)
+            return SendResult("DRY_RUN", 0)
+        url = ("https://api.twilio.com/2010-04-01/Accounts/"
+               f"{self.config.account_sid}/Messages.json")
+        with self._client_factory() as client:
+            for attempt in range(1, self.config.max_attempts + 1):
+                try:
+                    response = client.post(url, data={"To": normalize_e164(self.config.recipient_phone),
+                                                       "From": normalize_e164(self.config.from_number),
+                                                       "Body": message})
+                    response.raise_for_status()
+                    return SendResult(response.json().get("sid"), attempt)
+                except httpx.HTTPStatusError as exc:
+                    retryable = exc.response.status_code == 429 or exc.response.status_code >= 500
+                    if not retryable or attempt == self.config.max_attempts:
+                        raise NotificationSendError(
+                            f"Twilio respondeu HTTP {exc.response.status_code}.", attempt
+                        ) from exc
+                except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                    if attempt == self.config.max_attempts:
+                        raise NotificationSendError("Twilio temporariamente indisponível.", attempt) from exc
+                except httpx.RequestError as exc:
+                    raise NotificationSendError(
+                        "Conexão interrompida; envio não repetido para evitar SMS duplicado.", attempt
+                    ) from exc
+                self._sleep(2 ** (attempt - 1))
+        raise NotificationSendError("Falha no envio SMS.", self.config.max_attempts)
+
+    def _default_client(self) -> httpx.Client:
+        return httpx.Client(timeout=self.config.timeout_seconds, follow_redirects=False,
+                            verify=verified_ssl_context(),
+                            auth=(self.config.account_sid, self.config.auth_token))
 
 
 class WhatsAppCloudClient:
@@ -201,14 +308,26 @@ class NotificationService:
         repository: MonitoringRepository | None = None,
         whatsapp_client: WhatsAppCloudClient | None = None,
         whatsapp_config: WhatsAppConfig | None = None,
+        sms_notifier: TwilioSMSNotifier | None = None,
+        sms_config: SMSConfig | None = None,
     ) -> None:
         self._repository = repository
         self.whatsapp_config = whatsapp_config or WhatsAppConfig.from_env()
         self._whatsapp = whatsapp_client or WhatsAppCloudClient(self.whatsapp_config)
+        self.sms_config = sms_config or SMSConfig.from_env()
+        self._sms = sms_notifier or TwilioSMSNotifier(self.sms_config)
 
     @property
     def whatsapp_configured(self) -> bool:
         return self.whatsapp_config.configured
+
+    @property
+    def sms_configured(self) -> bool:
+        return self.sms_config.configured
+
+    @property
+    def sms_recipient_masked(self) -> str | None:
+        return mask_phone(self.sms_config.recipient_phone) if self.sms_config.recipient_phone else None
 
     def notify(
         self,
@@ -219,6 +338,11 @@ class NotificationService:
     ) -> None:
         if result.status is not AvailabilityStatus.TEM_VAGA:
             return
+        if settings.sms_enabled:
+            try:
+                self._notify_sms(settings, result, monitoring_id, detected_at)
+            except Exception as exc:
+                LOGGER.exception("O alerta SMS não pôde ser processado: %s", exc)
         if settings.whatsapp_enabled:
             try:
                 self._notify_whatsapp(settings, result, monitoring_id, detected_at)
@@ -241,6 +365,37 @@ class NotificationService:
             message,
             ["Teste", "EFVM", "—", "—", "1 passageiro", _format_time(detected_at), PURCHASE_URL],
         )
+
+    def send_test_sms(self) -> SendResult:
+        return self._sms.send("EFVM Monitor: SMS de teste. O sistema apenas alerta e nao compra passagens.")
+
+    def _notify_sms(self, settings: Settings, result: AvailabilityResult,
+                    monitoring_id: int | None, detected_at: str) -> None:
+        message = format_sms_message(settings)
+        delivery_id = None
+        if self._repository is not None and monitoring_id is not None:
+            delivery = self._repository.begin_notification(
+                monitoring_id, detected_at=detected_at, result=result.status,
+                channel=SMS_CHANNEL, message=message, provider=self.sms_config.provider,
+                recipient_masked=mask_phone(self.sms_config.recipient_phone),
+            )
+            if delivery is None:
+                return
+            delivery_id = delivery.id
+        try:
+            sent = self._sms.send(message)
+        except (NotificationSendError, SMSConfigurationError) as exc:
+            attempts = exc.attempts if isinstance(exc, NotificationSendError) else 0
+            if self._repository is not None and delivery_id is not None:
+                self._repository.complete_notification(delivery_id, status=NotificationStatus.FAILED,
+                                                       attempt_count=attempts, error_message=str(exc))
+            LOGGER.error("SMS não enviado: %s", exc)
+            return
+        if self._repository is not None and delivery_id is not None:
+            self._repository.complete_notification(delivery_id, status=NotificationStatus.SENT,
+                                                   attempt_count=sent.attempts,
+                                                   external_message_id=sent.external_message_id)
+        LOGGER.info("SMS processado pelo provider %s.", self.sms_config.provider)
 
     def _notify_whatsapp(
         self,
@@ -297,6 +452,44 @@ def format_whatsapp_message(settings: Settings, detected_at: str) -> str:
         if settings.passengers == 1
         else f"{settings.passengers} passageiros"
     )
+
+
+def format_sms_message(settings: Settings) -> str:
+    origin = _sms_text(settings.origin_label or settings.origin)
+    destination = _sms_text(settings.destination_label or settings.destination)
+    travel_class = _sms_text(settings.travel_class)
+    return (f"EFVM Monitor: passagem encontrada! {origin} -> {destination}, "
+            f"{settings.travel_date.strftime('%d/%m/%Y')}, {travel_class}. "
+            "Disponibilidade encontrada; confira no portal oficial da Vale.")
+
+
+def normalize_e164(value: str) -> str:
+    normalized = re.sub(r"[\s().-]", "", value.strip())
+    if not re.fullmatch(r"\+[1-9]\d{7,14}", normalized):
+        raise SMSConfigurationError("Telefone deve usar o formato internacional E.164.")
+    return normalized
+
+
+def mask_phone(value: str) -> str:
+    try:
+        normalized = normalize_e164(value)
+    except SMSConfigurationError:
+        return "não configurado"
+    return f"{'*' * max(4, len(normalized) - 4)}{normalized[-4:]}"
+
+
+def _sms_text(value: str) -> str:
+    return value.translate(str.maketrans("áàâãäéèêëíìîïóòôõöúùûüçÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ",
+                                        "aaaaaeeeeiiiiooooouuuucAAAAAEEEEIIIIOOOOOUUUUC"))
+
+
+def _env_boolean(name: str, default: bool) -> bool:
+    value = os.getenv(name, str(default)).strip().casefold()
+    if value in {"1", "true", "sim", "yes", "on"}:
+        return True
+    if value in {"0", "false", "nao", "não", "no", "off"}:
+        return False
+    raise SMSConfigurationError(f"{name} deve ser verdadeiro ou falso.")
     return (
         "🚨 PASSAGEM ENCONTRADA\n\n"
         f"🚆 {origin} → {destination}\n"
