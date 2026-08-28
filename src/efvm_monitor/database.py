@@ -170,6 +170,17 @@ class MonitoringRepository:
             ).fetchone()
         return self._monitor_from_row(row) if row is not None else None
 
+    def latest_monitor(self) -> PersistedMonitor | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM monitoring_jobs
+                ORDER BY updated_at DESC, id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        return self._monitor_from_row(row) if row is not None else None
+
     def list_monitors(self) -> list[PersistedMonitor]:
         with self._connect() as connection:
             rows = connection.execute(
