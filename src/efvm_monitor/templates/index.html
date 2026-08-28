@@ -93,13 +93,35 @@
               </label>
             </div>
 
-            <label class="notification-option">
-              <input id="browser-notifications" type="checkbox">
-              <span>
-                <strong>Notificação do navegador</strong>
-                <small>Peça permissão ao iniciar e avise quando aparecer uma vaga.</small>
-              </span>
-            </label>
+            <fieldset class="alert-options">
+              <legend>Alertas</legend>
+              <label class="notification-option notification-primary">
+                <input
+                  id="whatsapp-alerts"
+                  type="checkbox"
+                  data-configured="{{ 'true' if whatsapp_configured else 'false' }}"
+                  {% if whatsapp_configured %}checked{% else %}disabled{% endif %}
+                >
+                <span>
+                  <strong>WhatsApp <em>Principal</em></strong>
+                  <small>
+                    {% if whatsapp_configured %}
+                      Envia pela Cloud API oficial quando uma vaga aparecer.
+                    {% else %}
+                      Configure as credenciais no .env para habilitar este canal.
+                    {% endif %}
+                  </small>
+                </span>
+              </label>
+
+              <label class="notification-option">
+                <input id="browser-notifications" type="checkbox">
+                <span>
+                  <strong>Notificação do navegador</strong>
+                  <small>Canal complementar enquanto esta página estiver aberta.</small>
+                </span>
+              </label>
+            </fieldset>
 
             <p id="form-error" class="form-error" role="alert" hidden></p>
 
@@ -143,6 +165,10 @@
             <div>
               <dt>Intervalo</dt>
               <dd id="summary-interval">—</dd>
+            </div>
+            <div>
+              <dt>Alertas</dt>
+              <dd id="summary-alerts">—</dd>
             </div>
           </dl>
 
