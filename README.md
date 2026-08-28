@@ -4,7 +4,7 @@ Prova de conceito em Python para consultar a disponibilidade de passagens do Tre
 Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O projeto
 **não compra passagem** e não acessa etapas de login, CPF, reserva, assento ou pagamento.
 
-## Escopo atual — Fases 1, 2, 3, 4, 4.1 e 4.2
+## Escopo atual — Fases 1, 2, 3, 4, 4.1, 4.2 e 5
 
 - configurar origem, destino, data, classe e quantidade de passageiros em `.env`;
 - consultar somente interfaces públicas usadas antes do fluxo de compra;
@@ -13,7 +13,7 @@ Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O pr
 - emitir alerta no terminal e, opcionalmente, por webhook;
 - executar uma vez ou repetir a consulta em intervalo controlado.
 - escolher origem, destino, data e classe em uma interface local;
-- iniciar, acompanhar e parar um único monitoramento pelo navegador;
+- iniciar, acompanhar e operar vários monitoramentos pelo navegador;
 - instalar a interface como PWA e receber Web Push padrão mesmo com a página fechada;
 - persistir a configuração e o estado em SQLite local;
 - registrar o histórico de `TEM_VAGA`, `SEM_VAGA` e `ERRO`;
@@ -23,6 +23,8 @@ Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O pr
 - evitar mensagens repetidas enquanto a disponibilidade continuar `TEM_VAGA`;
 - registrar tentativas, sucessos e falhas dos alertas no SQLite;
 - manter o monitor funcionando mesmo quando um canal estiver indisponível.
+- executar monitores simultâneos com ID, estado, intervalo e histórico independentes;
+- pausar, retomar e remover logicamente cada monitor sem interromper os demais.
 
 Não fazem parte deste MVP: login, dados pessoais, escolha ou bloqueio de assento, reserva,
 pagamento, compra, solução de CAPTCHA e qualquer tentativa de contornar bloqueios ou
@@ -93,7 +95,8 @@ Abra [http://127.0.0.1:8000](http://127.0.0.1:8000) no navegador. A tela permite
 - selecionar classe Econômica ou Executiva;
 - monitorar exatamente 1 passageiro;
 - escolher intervalos a partir de 60 segundos;
-- iniciar e parar o monitoramento;
+- adicionar vários monitoramentos sem parar os que já estão ativos;
+- listar, pausar, retomar, remover e abrir o histórico individual de cada ID;
 - acompanhar `AGUARDANDO`, `TEM_VAGA`, `SEM_VAGA`, `ERRO` e `PARADO`;
 - instalar a PWA em navegadores compatíveis;
 - ativar Web Push explicitamente neste dispositivo, sem pedido automático de permissão;
@@ -114,14 +117,14 @@ servidor por uma URL HTTPS válida. A publicação contínua e sua configuraçã
 fora desta fase; não exponha o servidor de desenvolvimento diretamente na internet.
 
 O estado é persistido no caminho definido por `EFVM_DATABASE_PATH`, cujo padrão é
-`data/efvm-monitor.db`. Ao reiniciar o servidor, o último monitor é recuperado. Se ele estava
-ativo, a consulta é retomada automaticamente; se estava pausado, permanece parada.
+`data/efvm-monitor.db`. Ao reiniciar o servidor, todos os monitores são recuperados. Cada um
+que estava ativo recebe novamente seu executor independente; os pausados permanecem parados.
 
 ## Persistência local
 
-O SQLite é inicializado automaticamente por uma migration idempotente. A inicialização usa
-somente `CREATE TABLE IF NOT EXISTS` e `CREATE INDEX IF NOT EXISTS`: não há `DROP`, `DELETE`
-ou limpeza automática de dados.
+O SQLite é inicializado automaticamente por migrations versionadas e aplicadas uma única vez.
+Não há `DROP`, `DELETE` automático ou limpeza de dados. A migration da Fase 5 usa apenas
+`ALTER TABLE ... ADD COLUMN` e um índice para acrescentar a remoção lógica.
 
 Tabelas atuais:
 
@@ -132,6 +135,10 @@ Tabelas atuais:
 - `push_subscriptions`: endpoint e chaves públicas de cada navegador/dispositivo;
 - `monitoring_push_subscriptions`: vínculo entre dispositivo e monitoramento, sem broadcast;
 - `schema_migrations`: versões de schema já aplicadas.
+
+`monitoring_jobs.removed_at` implementa remoção lógica. Remover pela interface não executa
+`DELETE`: configuração, verificações e entregas continuam preservadas no SQLite, mas o monitor
+deixa de aparecer e não pode ser retomado pela aplicação.
 
 O status do monitor é numérico no banco:
 
@@ -345,6 +352,13 @@ do formulário. Eles não fazem chamadas ao portal nem enviam mensagens reais.
 | `GET` | `/api/monitoramento` | Consulta o estado atual |
 | `GET` | `/api/monitoramento/historico` | Consulta o histórico do monitor atual |
 | `DELETE` | `/api/monitoramento` | Solicita a parada |
+| `POST` | `/api/monitoramentos` | Cria e inicia um monitor com ID próprio |
+| `GET` | `/api/monitoramentos` | Lista todos os monitores visíveis |
+| `GET` | `/api/monitoramentos/{id}` | Consulta um monitor específico |
+| `POST` | `/api/monitoramentos/{id}/pausar` | Pausa somente o ID informado |
+| `POST` | `/api/monitoramentos/{id}/retomar` | Retoma somente o ID informado |
+| `DELETE` | `/api/monitoramentos/{id}` | Remove logicamente somente o ID informado |
+| `GET` | `/api/monitoramentos/{id}/historico` | Consulta o histórico daquele ID |
 | `GET` | `/api/push/config` | Entrega apenas a configuração pública do Web Push |
 | `GET` | `/api/push/status` | Consulta o vínculo do dispositivo atual |
 | `POST` | `/api/push/subscribe` | Salva e vincula uma subscription |
@@ -361,6 +375,7 @@ src/efvm_monitor/
 ├── cli.py       # execução única/contínua e logs
 ├── config.py    # leitura e validação do .env
 ├── database.py  # camada exclusiva de acesso ao SQLite
+├── manager.py   # executores concorrentes e operações independentes por ID
 ├── migrations/  # evolução idempotente do schema local
 ├── monitor.py   # ciclo em segundo plano, persistência e retomada
 ├── network.py   # HTTPS verificado com certificados do sistema
@@ -373,7 +388,9 @@ tests/
 ├── test_checker.py
 ├── test_cli.py
 ├── test_database.py
+├── test_manager.py
 ├── test_monitor.py
+├── test_multiple_web.py
 ├── test_notifier.py
 ├── test_sms.py
 ├── test_web.py
@@ -389,9 +406,11 @@ tests/
   reserva garantida;
 - uma resposta inesperada é classificada como `ERRO`, nunca como ausência de vaga;
 - o monitor depende da janela de venda informada dinamicamente pelo portal.
-- somente um monitoramento pode ficar ativo por processo;
 - uma configuração salva cuja data já expirou é recuperada como `ERRO` e não é iniciada;
-- múltiplos monitoramentos simultâneos continuam reservados para a Fase 5.
+- cada monitor aceita exatamente um passageiro nesta fase, mas classe, trajeto e intervalo
+  permanecem armazenados de forma independente;
+- muitos monitores aumentam o número de consultas ao portal; use intervalos responsáveis e
+  não duplique pesquisas equivalentes;
 - o envio real depende de uma conta Meta válida, destinatário permitido e, quando aplicável,
   template aprovado;
 - o Web Push depende do suporte do navegador, de permissão explícita e de HTTPS fora do
