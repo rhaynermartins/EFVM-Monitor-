@@ -97,20 +97,33 @@
               <legend>Alertas</legend>
               <label class="notification-option notification-primary">
                 <input
+                  id="sms-alerts"
+                  type="checkbox"
+                  data-configured="{{ 'true' if sms_configured else 'false' }}"
+                  {% if sms_configured %}checked{% else %}disabled{% endif %}
+                >
+                <span>
+                  <strong>SMS <em>Principal</em></strong>
+                  <small>
+                    {% if sms_configured %}
+                      Configurado para {{ sms_recipient_masked }} via Twilio.
+                    {% else %}
+                      Configure a Twilio no .env para habilitar este canal.
+                    {% endif %}
+                  </small>
+                </span>
+              </label>
+
+              <label class="notification-option">
+                <input
                   id="whatsapp-alerts"
                   type="checkbox"
                   data-configured="{{ 'true' if whatsapp_configured else 'false' }}"
                   {% if whatsapp_configured %}checked{% else %}disabled{% endif %}
                 >
                 <span>
-                  <strong>WhatsApp <em>Principal</em></strong>
-                  <small>
-                    {% if whatsapp_configured %}
-                      Envia pela Cloud API oficial quando uma vaga aparecer.
-                    {% else %}
-                      Configure as credenciais no .env para habilitar este canal.
-                    {% endif %}
-                  </small>
+                  <strong>WhatsApp</strong>
+                  <small>Canal complementar, desabilitado por padrão.</small>
                 </span>
               </label>
 
