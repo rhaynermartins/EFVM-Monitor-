@@ -159,6 +159,7 @@ a {
 }
 
 .panel {
+  min-width: 0;
   padding: 28px;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -525,6 +526,7 @@ a {
   margin-top: 12px;
   font-size: 0.88rem;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .monitor-meta,
