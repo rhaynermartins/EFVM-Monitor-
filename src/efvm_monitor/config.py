@@ -58,6 +58,7 @@ class Settings:
     railway_code: str
     alert_webhook_url: str | None
     whatsapp_enabled: bool = False
+    sms_enabled: bool = False
     origin_label: str | None = None
     destination_label: str | None = None
 
@@ -77,6 +78,7 @@ class Settings:
         railway_code: str = "03",
         alert_webhook_url: str | None = None,
         whatsapp_enabled: bool = False,
+        sms_enabled: bool = False,
         origin_label: str | None = None,
         destination_label: str | None = None,
     ) -> Settings:
@@ -119,6 +121,7 @@ class Settings:
             railway_code=railway_code.strip() or "03",
             alert_webhook_url=(alert_webhook_url or "").strip() or None,
             whatsapp_enabled=whatsapp_enabled,
+            sms_enabled=sms_enabled,
             origin_label=(origin_label or "").strip() or None,
             destination_label=(destination_label or "").strip() or None,
         )
@@ -162,7 +165,8 @@ class Settings:
             base_url=base_url.rstrip("/"),
             railway_code=os.getenv("EFVM_RAILWAY_CODE", "03").strip() or "03",
             alert_webhook_url=webhook,
-            whatsapp_enabled=_boolean("WHATSAPP_ENABLED", True),
+            whatsapp_enabled=_boolean("WHATSAPP_ENABLED", False),
+            sms_enabled=_boolean("SMS_ENABLED", True),
             origin_label=origin,
             destination_label=destination,
         )
