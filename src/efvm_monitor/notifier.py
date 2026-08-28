@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
 
 from efvm_monitor.checker import AvailabilityResult, AvailabilityStatus
 from efvm_monitor.config import Settings
@@ -48,6 +49,7 @@ class WhatsAppConfig:
 
     @classmethod
     def from_env(cls) -> WhatsAppConfig:
+        load_dotenv()
         return cls(
             access_token=os.getenv("WHATSAPP_ACCESS_TOKEN", "").strip(),
             phone_number_id=os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip(),
