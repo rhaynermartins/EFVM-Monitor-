@@ -561,6 +561,19 @@ class MonitoringRepository:
     ) -> PushSubscription:
         now = self._now()
         with self._connect() as connection:
+            existing = connection.execute(
+                "SELECT id, user_id FROM push_subscriptions WHERE endpoint = ?",
+                (endpoint,),
+            ).fetchone()
+            if existing is not None and int(existing["user_id"]) != user_id:
+                connection.execute(
+                    """
+                    UPDATE monitoring_push_subscriptions
+                    SET active = 0, updated_at = ?
+                    WHERE subscription_id = ?
+                    """,
+                    (now, int(existing["id"])),
+                )
             connection.execute(
                 """
                 INSERT INTO push_subscriptions (
@@ -575,8 +588,6 @@ class MonitoringRepository:
                     user_agent = excluded.user_agent,
                     active = 1,
                     updated_at = excluded.updated_at
-                WHERE push_subscriptions.user_id = excluded.user_id
-                   OR push_subscriptions.active = 0
                 """,
                 (user_id, device_id, endpoint, p256dh, auth, user_agent, now, now),
             )
@@ -585,7 +596,7 @@ class MonitoringRepository:
                 (endpoint, user_id),
             ).fetchone()
         if row is None:
-            raise PermissionError("Esta inscrição Web Push pertence a outro usuário.")
+            raise RuntimeError("A inscrição Web Push não foi salva.")
         return self._push_subscription_from_row(row)
 
     def get_push_subscription_for_device(
