@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Monitor local de disponibilidade de passagens da EFVM">
     <meta name="theme-color" content="#176b4d">
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <title>EFVM Monitor</title>
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
@@ -22,12 +23,23 @@
             <small>Disponibilidade de passagens</small>
           </span>
         </a>
-        <a
-          class="official-link"
-          href="{{ official_portal_url }}"
-          target="_blank"
-          rel="noreferrer"
-        >Abrir portal oficial</a>
+        <div class="header-actions">
+          <a
+            class="official-link"
+            href="{{ official_portal_url }}"
+            target="_blank"
+            rel="noreferrer"
+          >Abrir portal oficial</a>
+          {% if authentication_enabled %}
+            <div class="account-summary">
+              <span>
+                <strong>{{ authenticated_user.name }}</strong>
+                <small>{{ authenticated_user.email }}</small>
+              </span>
+              <button id="logout-button" class="text-button" type="button">Sair</button>
+            </div>
+          {% endif %}
+        </div>
       </div>
     </header>
 
@@ -37,7 +49,7 @@
         <h1 id="page-title">Encontre a passagem. A compra continua sendo sua.</h1>
         <p>
           Escolha o trajeto e a data. O monitor consulta a disponibilidade e avisa quando
-          encontrar uma opção, sem reservar assento e sem acessar dados pessoais.
+          encontrar uma opção, sem reservar assento e sem acessar sua conta na Vale.
         </p>
       </section>
 
@@ -133,7 +145,7 @@
                     {% if sms_configured %}
                       Configurado para {{ sms_recipient_masked }} via Twilio.
                     {% else %}
-                      Configure a Twilio no .env para habilitar este canal.
+                      Indisponível na interface multiusuário. O Web Push é o canal principal.
                     {% endif %}
                   </small>
                 </span>
@@ -148,7 +160,7 @@
                 >
                 <span>
                   <strong>WhatsApp</strong>
-                  <small>Canal complementar, desabilitado por padrão.</small>
+                  <small>Indisponível na interface multiusuário.</small>
                 </span>
               </label>
             </fieldset>
