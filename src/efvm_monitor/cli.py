@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import time
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-import httpx
-
 from efvm_monitor.checker import AvailabilityResult, AvailabilityStatus, EFVMClient
 from efvm_monitor.config import ConfigurationError, Settings
-from efvm_monitor.notifier import send_availability_alert
+from efvm_monitor.notifier import (
+    NotificationSendError,
+    NotificationService,
+    WhatsAppConfigurationError,
+)
 
 LOGGER = logging.getLogger(__name__)
 EXIT_CODES = {
@@ -35,6 +39,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--env-file",
         help="caminho de um arquivo .env alternativo",
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=("monitor", "test-whatsapp"),
+        default="monitor",
+        help="use test-whatsapp para validar a Cloud API sem consultar passagens",
     )
     return parser
 
@@ -65,25 +76,29 @@ def _print_result(result: AvailabilityResult) -> None:
     print(f"{result.status.value} | {result.message}", flush=True)
 
 
-def _notify(settings: Settings, result: AvailabilityResult) -> bool:
-    try:
-        send_availability_alert(settings, result)
-        return True
-    except httpx.HTTPError as exc:
-        LOGGER.error("Vaga encontrada, mas o webhook não recebeu o alerta: %s", exc)
-        return False
+def _notify(
+    notifier: NotificationService,
+    settings: Settings,
+    result: AvailabilityResult,
+) -> None:
+    notifier.notify(
+        settings,
+        result,
+        monitoring_id=None,
+        detected_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+    )
 
 
-def run_once(settings: Settings) -> int:
+def run_once(settings: Settings, notifier: NotificationService | None = None) -> int:
     with EFVMClient(settings) as client:
         result = client.check()
     _print_result(result)
-    if not _notify(settings, result):
-        return EXIT_CODES[AvailabilityStatus.ERRO]
+    _notify(notifier or NotificationService(), settings, result)
     return EXIT_CODES[result.status]
 
 
-def watch(settings: Settings) -> int:
+def watch(settings: Settings, notifier: NotificationService | None = None) -> int:
+    notification_service = notifier or NotificationService()
     previous_status: AvailabilityStatus | None = None
     with EFVMClient(settings) as client:
         while True:
@@ -94,13 +109,25 @@ def watch(settings: Settings) -> int:
                 and previous_status is not result.status
             )
             if became_available:
-                _notify(settings, result)
+                _notify(notification_service, settings, result)
             previous_status = result.status
             time.sleep(settings.check_interval_seconds)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "test-whatsapp":
+        _configure_logging(os.getenv("EFVM_LOG_LEVEL", "INFO").strip().upper())
+        try:
+            result = NotificationService().send_test()
+        except (NotificationSendError, WhatsAppConfigurationError) as exc:
+            print(f"ERRO | {exc}", file=sys.stderr)
+            return EXIT_CODES[AvailabilityStatus.ERRO]
+        print(
+            f"WHATSAPP_ENVIADO | mensagem de teste enviada em {result.attempts} tentativa(s)."
+        )
+        return 0
+
     try:
         settings = Settings.from_env(args.env_file)
     except ConfigurationError as exc:
