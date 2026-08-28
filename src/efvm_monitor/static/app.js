@@ -8,6 +8,7 @@ const elements = {
   travelClass: document.querySelector("#travel-class"),
   passengers: document.querySelector("#passengers"),
   interval: document.querySelector("#interval"),
+  whatsappAlerts: document.querySelector("#whatsapp-alerts"),
   notifications: document.querySelector("#browser-notifications"),
   startButton: document.querySelector("#start-button"),
   stopButton: document.querySelector("#stop-button"),
@@ -21,6 +22,7 @@ const elements = {
   summaryRoute: document.querySelector("#summary-route"),
   summaryDateClass: document.querySelector("#summary-date-class"),
   summaryInterval: document.querySelector("#summary-interval"),
+  summaryAlerts: document.querySelector("#summary-alerts"),
   refreshHistory: document.querySelector("#refresh-history"),
   historyEmpty: document.querySelector("#history-empty"),
   historyList: document.querySelector("#history-list"),
@@ -118,11 +120,13 @@ function setControls(running) {
     elements.travelDate,
     elements.travelClass,
     elements.interval,
-    elements.notifications,
   ];
   formControls.forEach((control) => {
     control.disabled = running || !catalogReady;
   });
+  elements.whatsappAlerts.disabled =
+    running || elements.whatsappAlerts.dataset.configured !== "true";
+  elements.notifications.disabled = running || !catalogReady;
   elements.passengers.disabled = true;
   elements.startButton.disabled = running || !catalogReady;
   elements.stopButton.disabled = !running;
@@ -159,6 +163,9 @@ function applyQueryToForm(query) {
   elements.destination.value = String(query.destination);
   elements.travelDate.value = query.travel_date;
   elements.interval.value = String(query.check_interval_seconds);
+  if (elements.whatsappAlerts.dataset.configured === "true") {
+    elements.whatsappAlerts.checked = Boolean(query.whatsapp_enabled);
+  }
   const classOption = Array.from(elements.travelClass.options).find(
     (item) => item.text === query.travel_class,
   );
@@ -173,6 +180,10 @@ function renderQuery(query) {
   elements.summaryRoute.textContent = `${stationName(query.origin)} → ${stationName(query.destination)}`;
   elements.summaryDateClass.textContent = `${formatTravelDate(query.travel_date)} · ${query.travel_class} · 1 passageiro`;
   elements.summaryInterval.textContent = `${query.check_interval_seconds} segundos`;
+  const alertChannels = [];
+  if (query.whatsapp_enabled) alertChannels.push("WhatsApp (principal)");
+  if (elements.notifications.checked) alertChannels.push("Navegador");
+  elements.summaryAlerts.textContent = alertChannels.join(" + ") || "Nenhum canal ativado";
 }
 
 function maybeNotify(state) {
@@ -261,6 +272,7 @@ async function startMonitoring(event) {
         travel_class: elements.travelClass.options[elements.travelClass.selectedIndex].text,
         passengers: 1,
         interval_seconds: Number(elements.interval.value),
+        whatsapp_enabled: elements.whatsappAlerts.checked,
       }),
     });
     renderState(state);
