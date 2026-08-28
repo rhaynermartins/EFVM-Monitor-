@@ -24,6 +24,9 @@ const elements = {
   statusIcon: document.querySelector("#status-icon"),
   statusMessage: document.querySelector("#status-message"),
   lastCheck: document.querySelector("#last-check"),
+  monitorsEmpty: document.querySelector("#monitors-empty"),
+  monitorsList: document.querySelector("#monitors-list"),
+  currentMonitorDetail: document.querySelector("#current-monitor-detail"),
   querySummary: document.querySelector("#query-summary"),
   summaryRoute: document.querySelector("#summary-route"),
   summaryDateClass: document.querySelector("#summary-date-class"),
@@ -37,6 +40,8 @@ const elements = {
 let catalogReady = false;
 let stationsById = new Map();
 let currentQuery = null;
+let selectedMonitorId = null;
+let currentMonitors = [];
 let pushRegistration = null;
 let pushConfig = null;
 let pushSubscribed = false;
@@ -125,7 +130,6 @@ async function loadCatalog() {
     elements.travelDate.max = localDateValue(maximumDate);
 
     catalogReady = true;
-    applyQueryToForm(currentQuery);
     elements.catalogState.textContent = `${catalog.stations.length} estações disponíveis`;
     elements.catalogState.className = "catalog-state ready";
     setControls(false);
@@ -136,7 +140,7 @@ async function loadCatalog() {
   }
 }
 
-function setControls(running) {
+function setControls(_running = false) {
   const formControls = [
     elements.origin,
     elements.destination,
@@ -145,14 +149,14 @@ function setControls(running) {
     elements.interval,
   ];
   formControls.forEach((control) => {
-    control.disabled = running || !catalogReady;
+    control.disabled = !catalogReady;
   });
   elements.whatsappAlerts.disabled =
-    running || elements.whatsappAlerts.dataset.configured !== "true";
-  elements.smsAlerts.disabled = running || elements.smsAlerts.dataset.configured !== "true";
+    elements.whatsappAlerts.dataset.configured !== "true";
+  elements.smsAlerts.disabled = elements.smsAlerts.dataset.configured !== "true";
   elements.passengers.disabled = true;
-  elements.startButton.disabled = running || !catalogReady;
-  elements.stopButton.disabled = !running;
+  elements.startButton.disabled = !catalogReady;
+  elements.stopButton.disabled = true;
 }
 
 function statusClass(status) {
@@ -202,7 +206,6 @@ function renderQuery(query) {
   currentQuery = query;
   elements.querySummary.hidden = !query;
   if (!query) return;
-  applyQueryToForm(query);
   elements.summaryRoute.textContent = `${stationName(query.origin)} → ${stationName(query.destination)}`;
   elements.summaryDateClass.textContent = `${formatTravelDate(query.travel_date)} · ${query.travel_class} · 1 passageiro`;
   elements.summaryInterval.textContent = `${query.check_interval_seconds} segundos`;
@@ -214,16 +217,92 @@ function renderQuery(query) {
 }
 
 function renderState(state) {
-  elements.statusBadge.textContent = state.status;
-  elements.statusBadge.className = `status-badge ${statusClass(state.status)}`;
+  elements.currentMonitorDetail.hidden = false;
   elements.statusIcon.textContent = statusIcon(state.status);
   elements.statusMessage.textContent = state.message;
   elements.lastCheck.textContent = state.checked_at
     ? `Última verificação: ${new Date(state.checked_at).toLocaleString("pt-BR")}`
     : "A última verificação aparecerá aqui.";
   renderQuery(state.query);
-  setControls(state.running);
-  if (state.status === "ENCERRANDO") elements.stopButton.disabled = true;
+}
+
+function monitorAction(label, action, destructive = false) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `text-button${destructive ? " text-button-danger" : ""}`;
+  button.textContent = label;
+  button.addEventListener("click", action);
+  return button;
+}
+
+function renderMonitors(items) {
+  currentMonitors = items;
+  if (items.length > 0 && !items.some((item) => item.monitoring_id === selectedMonitorId)) {
+    selectedMonitorId = items[0].monitoring_id;
+  }
+  elements.monitorsList.replaceChildren();
+  elements.monitorsEmpty.hidden = items.length > 0;
+  elements.statusBadge.textContent = `${items.length} ${items.length === 1 ? "MONITOR" : "MONITORES"}`;
+  elements.statusBadge.className = `status-badge ${
+    items.some((item) => item.running) ? "status-aguardando" : "status-parado"
+  }`;
+
+  items.forEach((state) => {
+    const card = document.createElement("article");
+    card.className = "monitor-card";
+    if (state.monitoring_id === selectedMonitorId) card.classList.add("selected");
+
+    const heading = document.createElement("div");
+    heading.className = "monitor-card-heading";
+    const identity = document.createElement("span");
+    identity.className = "monitor-identity";
+    identity.textContent = `Monitor #${state.monitoring_id}`;
+    const badge = document.createElement("span");
+    badge.className = `status-badge ${statusClass(state.status)}`;
+    badge.textContent = state.status;
+    heading.append(identity, badge);
+
+    const route = document.createElement("strong");
+    route.className = "monitor-route";
+    route.textContent = `${stationName(state.query.origin)} → ${stationName(state.query.destination)}`;
+    const meta = document.createElement("p");
+    meta.className = "monitor-meta";
+    meta.textContent = `${formatTravelDate(state.query.travel_date)} · ${state.query.travel_class} · 1 passageiro · ${state.query.check_interval_seconds}s`;
+    const message = document.createElement("p");
+    message.className = "monitor-message";
+    message.textContent = state.message;
+
+    const actions = document.createElement("div");
+    actions.className = "monitor-actions";
+    actions.append(
+      monitorAction("Ver histórico", async () => {
+        selectedMonitorId = state.monitoring_id;
+        renderMonitors(currentMonitors);
+        renderState(state);
+        await loadHistory(state.monitoring_id);
+      }),
+    );
+    if (state.running) {
+      actions.append(monitorAction("Pausar", () => pauseMonitor(state.monitoring_id)));
+    } else {
+      actions.append(monitorAction("Retomar", () => resumeMonitor(state.monitoring_id)));
+    }
+    actions.append(
+      monitorAction("Remover", () => removeMonitor(state.monitoring_id), true),
+    );
+    card.append(heading, route, meta, message, actions);
+    elements.monitorsList.append(card);
+  });
+
+  if (items.length === 0) {
+    selectedMonitorId = null;
+    elements.currentMonitorDetail.hidden = true;
+    renderHistory([]);
+    return;
+  }
+  const selected = items.find((item) => item.monitoring_id === selectedMonitorId) || items[0];
+  selectedMonitorId = selected.monitoring_id;
+  renderState(selected);
 }
 
 function renderHistory(items) {
@@ -250,9 +329,15 @@ function renderHistory(items) {
   });
 }
 
-async function loadHistory() {
+async function loadHistory(monitoringId = selectedMonitorId) {
+  if (!monitoringId) {
+    renderHistory([]);
+    return;
+  }
   try {
-    const history = await fetchJson("/api/monitoramento/historico?limit=10");
+    const history = await fetchJson(
+      `/api/monitoramentos/${monitoringId}/historico?limit=10`,
+    );
     renderHistory(history.items);
   } catch (error) {
     elements.historyList.replaceChildren();
@@ -415,7 +500,7 @@ async function startMonitoring(event) {
 
   try {
     elements.startButton.disabled = true;
-    const state = await fetchJson("/api/monitoramento", {
+    const state = await fetchJson("/api/monitoramentos", {
       method: "POST",
       body: JSON.stringify({
         origin: elements.origin.value,
@@ -429,7 +514,8 @@ async function startMonitoring(event) {
         push_device_id: pushSubscribed ? pushDeviceId : null,
       }),
     });
-    renderState(state);
+    selectedMonitorId = state.monitoring_id;
+    await refreshState();
   } catch (error) {
     setFormError(error.message);
     setControls(false);
@@ -446,10 +532,47 @@ async function stopMonitoring() {
   }
 }
 
+async function pauseMonitor(monitoringId) {
+  setFormError();
+  try {
+    await fetchJson(`/api/monitoramentos/${monitoringId}/pausar`, { method: "POST" });
+    await refreshState();
+  } catch (error) {
+    setFormError(error.message);
+  }
+}
+
+async function resumeMonitor(monitoringId) {
+  setFormError();
+  try {
+    await fetchJson(`/api/monitoramentos/${monitoringId}/retomar`, { method: "POST" });
+    selectedMonitorId = monitoringId;
+    await refreshState();
+  } catch (error) {
+    setFormError(error.message);
+  }
+}
+
+async function removeMonitor(monitoringId) {
+  const confirmed = window.confirm(
+    `Remover o monitor #${monitoringId}? O histórico continuará preservado localmente.`,
+  );
+  if (!confirmed) return;
+  setFormError();
+  try {
+    await fetchJson(`/api/monitoramentos/${monitoringId}`, { method: "DELETE" });
+    if (selectedMonitorId === monitoringId) selectedMonitorId = null;
+    await refreshState();
+  } catch (error) {
+    setFormError(error.message);
+  }
+}
+
 async function refreshState() {
   try {
-    renderState(await fetchJson("/api/monitoramento"));
-    await loadHistory();
+    const response = await fetchJson("/api/monitoramentos");
+    renderMonitors(response.items);
+    await loadHistory(selectedMonitorId);
   } catch (error) {
     setFormError(`Não foi possível atualizar o estado: ${error.message}`);
   }
@@ -457,7 +580,7 @@ async function refreshState() {
 
 elements.form.addEventListener("submit", startMonitoring);
 elements.stopButton.addEventListener("click", stopMonitoring);
-elements.refreshHistory.addEventListener("click", loadHistory);
+elements.refreshHistory.addEventListener("click", () => loadHistory(selectedMonitorId));
 elements.activatePush.addEventListener("click", activatePush);
 elements.testPush.addEventListener("click", testPush);
 elements.disablePush.addEventListener("click", disablePush);
