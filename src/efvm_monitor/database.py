@@ -20,6 +20,12 @@ class MonitorStatus(IntEnum):
     ACTIVE = 1
 
 
+class NotificationStatus(IntEnum):
+    PENDING = 0
+    SENT = 1
+    FAILED = 2
+
+
 @dataclass(frozen=True, slots=True)
 class PersistedMonitor:
     id: int
@@ -36,6 +42,9 @@ class PersistedMonitor:
     availability_changed_at: str | None
     created_at: str
     updated_at: str
+    whatsapp_enabled: bool = False
+    origin_label: str | None = None
+    destination_label: str | None = None
 
     @property
     def active(self) -> bool:
@@ -69,6 +78,9 @@ class PersistedMonitor:
             base_url=base_url,
             railway_code=railway_code,
             alert_webhook_url=alert_webhook_url,
+            whatsapp_enabled=self.whatsapp_enabled,
+            origin_label=self.origin_label,
+            destination_label=self.destination_label,
         )
 
 
@@ -82,6 +94,28 @@ class HistoryEntry:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class NotificationDelivery:
+    id: int
+    monitoring_id: int
+    detected_at: str
+    result: str
+    channel: str
+    status: NotificationStatus
+    attempt_count: int
+    message: str
+    error_message: str | None
+    external_message_id: str | None
+    created_at: str
+    updated_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["status"] = int(self.status)
+        data["status_name"] = self.status.name
+        return data
 
 
 class MonitoringRepository:
@@ -144,6 +178,22 @@ class MonitoringRepository:
                 ),
             )
             monitoring_id = int(cursor.lastrowid)
+            connection.execute(
+                """
+                INSERT INTO monitoring_notification_preferences (
+                    monitoring_id, whatsapp_enabled, origin_label, destination_label,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    monitoring_id,
+                    int(settings.whatsapp_enabled),
+                    settings.origin_label,
+                    settings.destination_label,
+                    now,
+                    now,
+                ),
+            )
         monitor = self.get_monitor(monitoring_id)
         if monitor is None:
             raise RuntimeError("O monitoramento criado não foi encontrado no banco local.")
@@ -152,7 +202,7 @@ class MonitoringRepository:
     def get_monitor(self, monitoring_id: int) -> PersistedMonitor | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT * FROM monitoring_jobs WHERE id = ?",
+                f"{self._monitor_select()} WHERE m.id = ?",
                 (monitoring_id,),
             ).fetchone()
         return self._monitor_from_row(row) if row is not None else None
@@ -160,10 +210,10 @@ class MonitoringRepository:
     def latest_active_monitor(self) -> PersistedMonitor | None:
         with self._connect() as connection:
             row = connection.execute(
-                """
-                SELECT * FROM monitoring_jobs
-                WHERE status = ?
-                ORDER BY updated_at DESC, id DESC
+                f"""
+                {self._monitor_select()}
+                WHERE m.status = ?
+                ORDER BY m.updated_at DESC, m.id DESC
                 LIMIT 1
                 """,
                 (int(MonitorStatus.ACTIVE),),
@@ -173,9 +223,9 @@ class MonitoringRepository:
     def latest_monitor(self) -> PersistedMonitor | None:
         with self._connect() as connection:
             row = connection.execute(
-                """
-                SELECT * FROM monitoring_jobs
-                ORDER BY updated_at DESC, id DESC
+                f"""
+                {self._monitor_select()}
+                ORDER BY m.updated_at DESC, m.id DESC
                 LIMIT 1
                 """
             ).fetchone()
@@ -184,7 +234,7 @@ class MonitoringRepository:
     def list_monitors(self) -> list[PersistedMonitor]:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM monitoring_jobs ORDER BY created_at DESC, id DESC"
+                f"{self._monitor_select()} ORDER BY m.created_at DESC, m.id DESC"
             ).fetchall()
         return [self._monitor_from_row(row) for row in rows]
 
@@ -262,6 +312,97 @@ class MonitoringRepository:
             ).fetchall()
         return [HistoryEntry(**dict(row)) for row in rows]
 
+    def begin_notification(
+        self,
+        monitoring_id: int,
+        *,
+        detected_at: str,
+        result: AvailabilityStatus,
+        channel: str,
+        message: str,
+    ) -> NotificationDelivery | None:
+        """Reserva uma entrega única antes do envio para evitar alertas duplicados."""
+        now = self._now()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO notification_deliveries (
+                    monitoring_id, detected_at, result, channel, status,
+                    attempt_count, message, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    monitoring_id,
+                    detected_at,
+                    result.value,
+                    channel,
+                    int(NotificationStatus.PENDING),
+                    0,
+                    message,
+                    now,
+                    now,
+                ),
+            )
+            if cursor.rowcount == 0:
+                return None
+            delivery_id = int(cursor.lastrowid)
+        return self.get_notification(delivery_id)
+
+    def get_notification(self, delivery_id: int) -> NotificationDelivery | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM notification_deliveries WHERE id = ?",
+                (delivery_id,),
+            ).fetchone()
+        return self._notification_from_row(row) if row is not None else None
+
+    def complete_notification(
+        self,
+        delivery_id: int,
+        *,
+        status: NotificationStatus,
+        attempt_count: int,
+        error_message: str | None = None,
+        external_message_id: str | None = None,
+    ) -> None:
+        if status is NotificationStatus.PENDING:
+            raise ValueError("Uma entrega concluída deve estar enviada ou com falha.")
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE notification_deliveries
+                SET status = ?, attempt_count = ?, error_message = ?,
+                    external_message_id = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    int(status),
+                    attempt_count,
+                    error_message,
+                    external_message_id,
+                    self._now(),
+                    delivery_id,
+                ),
+            )
+
+    def notification_history(
+        self,
+        monitoring_id: int,
+        limit: int = 100,
+    ) -> list[NotificationDelivery]:
+        safe_limit = max(1, min(limit, 1_000))
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM notification_deliveries
+                WHERE monitoring_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (monitoring_id, safe_limit),
+            ).fetchall()
+        return [self._notification_from_row(row) for row in rows]
+
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.database_path, timeout=5)
@@ -294,7 +435,28 @@ class MonitoringRepository:
             availability_changed_at=row["availability_changed_at"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            whatsapp_enabled=bool(row["whatsapp_enabled"]),
+            origin_label=row["origin_label"],
+            destination_label=row["destination_label"],
         )
+
+    @staticmethod
+    def _notification_from_row(row: sqlite3.Row) -> NotificationDelivery:
+        data = dict(row)
+        data["status"] = NotificationStatus(data["status"])
+        return NotificationDelivery(**data)
+
+    @staticmethod
+    def _monitor_select() -> str:
+        return """
+            SELECT m.*,
+                   COALESCE(p.whatsapp_enabled, 0) AS whatsapp_enabled,
+                   p.origin_label,
+                   p.destination_label
+            FROM monitoring_jobs AS m
+            LEFT JOIN monitoring_notification_preferences AS p
+                ON p.monitoring_id = m.id
+        """
 
     @staticmethod
     def _now() -> str:
