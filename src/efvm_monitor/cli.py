@@ -11,6 +11,8 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from efvm_monitor.checker import AvailabilityResult, AvailabilityStatus, EFVMClient
 from efvm_monitor.config import ConfigurationError, Settings
 from efvm_monitor.notifier import (
@@ -116,6 +118,7 @@ def watch(settings: Settings, notifier: NotificationService | None = None) -> in
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    load_dotenv(dotenv_path=args.env_file)
     if args.command == "test-whatsapp":
         _configure_logging(os.getenv("EFVM_LOG_LEVEL", "INFO").strip().upper())
         try:
