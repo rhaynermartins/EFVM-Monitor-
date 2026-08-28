@@ -59,8 +59,10 @@ def multiple_client(tmp_path: Path) -> Iterator[TestClient]:
         manager=manager,
         repository=storage,
         catalog_provider=lambda: CATALOG,
+        authentication_enabled=False,
     )
     with TestClient(application) as client:
+        client.headers["X-CSRF-Token"] = "test-csrf-token"
         yield client
 
 
