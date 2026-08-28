@@ -123,6 +123,27 @@ class NotificationDelivery:
         return data
 
 
+@dataclass(frozen=True, slots=True)
+class PushSubscription:
+    id: int
+    device_id: str
+    endpoint: str
+    p256dh: str
+    auth: str
+    user_agent: str | None
+    active: bool
+    last_success_at: str | None
+    last_failure_at: str | None
+    created_at: str
+    updated_at: str
+
+    def to_push_info(self) -> dict[str, Any]:
+        return {
+            "endpoint": self.endpoint,
+            "keys": {"p256dh": self.p256dh, "auth": self.auth},
+        }
+
+
 class MonitoringRepository:
     """Persiste configurações e verificações sem expor SQL às outras camadas."""
 
@@ -435,6 +456,164 @@ class MonitoringRepository:
             ).fetchall()
         return [self._notification_from_row(row) for row in rows]
 
+    def upsert_push_subscription(
+        self,
+        *,
+        device_id: str,
+        endpoint: str,
+        p256dh: str,
+        auth: str,
+        user_agent: str | None,
+    ) -> PushSubscription:
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO push_subscriptions (
+                    device_id, endpoint, p256dh, auth, user_agent, active,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                ON CONFLICT(endpoint) DO UPDATE SET
+                    device_id = excluded.device_id,
+                    p256dh = excluded.p256dh,
+                    auth = excluded.auth,
+                    user_agent = excluded.user_agent,
+                    active = 1,
+                    updated_at = excluded.updated_at
+                """,
+                (device_id, endpoint, p256dh, auth, user_agent, now, now),
+            )
+            row = connection.execute(
+                "SELECT * FROM push_subscriptions WHERE endpoint = ?",
+                (endpoint,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("A inscrição Web Push não foi salva.")
+        return self._push_subscription_from_row(row)
+
+    def get_push_subscription_for_device(
+        self,
+        device_id: str,
+    ) -> PushSubscription | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM push_subscriptions
+                WHERE device_id = ? AND active = 1
+                ORDER BY updated_at DESC, id DESC
+                LIMIT 1
+                """,
+                (device_id,),
+            ).fetchone()
+        return self._push_subscription_from_row(row) if row is not None else None
+
+    def list_push_subscriptions(self, monitoring_id: int) -> list[PushSubscription]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT s.*
+                FROM push_subscriptions AS s
+                INNER JOIN monitoring_push_subscriptions AS link
+                    ON link.subscription_id = s.id
+                WHERE link.monitoring_id = ?
+                  AND link.active = 1
+                  AND s.active = 1
+                ORDER BY s.created_at, s.id
+                """,
+                (monitoring_id,),
+            ).fetchall()
+        return [self._push_subscription_from_row(row) for row in rows]
+
+    def link_push_subscription(
+        self,
+        monitoring_id: int,
+        subscription_id: int,
+    ) -> None:
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO monitoring_push_subscriptions (
+                    monitoring_id, subscription_id, active, created_at, updated_at
+                ) VALUES (?, ?, 1, ?, ?)
+                ON CONFLICT(monitoring_id, subscription_id) DO UPDATE SET
+                    active = 1,
+                    updated_at = excluded.updated_at
+                """,
+                (monitoring_id, subscription_id, now, now),
+            )
+
+    def deactivate_push_subscription(self, subscription_id: int) -> None:
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE push_subscriptions
+                SET active = 0, updated_at = ?
+                WHERE id = ?
+                """,
+                (now, subscription_id),
+            )
+            connection.execute(
+                """
+                UPDATE monitoring_push_subscriptions
+                SET active = 0, updated_at = ?
+                WHERE subscription_id = ?
+                """,
+                (now, subscription_id),
+            )
+
+    def unsubscribe_push(self, *, device_id: str, endpoint: str) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id FROM push_subscriptions
+                WHERE device_id = ? AND endpoint = ? AND active = 1
+                """,
+                (device_id, endpoint),
+            ).fetchone()
+        if row is None:
+            return False
+        self.deactivate_push_subscription(int(row["id"]))
+        return True
+
+    def mark_push_success(self, subscription_id: int, sent_at: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE push_subscriptions
+                SET last_success_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (sent_at, sent_at, subscription_id),
+            )
+
+    def mark_push_failure(
+        self,
+        subscription_id: int,
+        failed_at: str,
+        *,
+        deactivate: bool = False,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE push_subscriptions
+                SET last_failure_at = ?, active = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (failed_at, int(not deactivate), failed_at, subscription_id),
+            )
+            if deactivate:
+                connection.execute(
+                    """
+                    UPDATE monitoring_push_subscriptions
+                    SET active = 0, updated_at = ?
+                    WHERE subscription_id = ?
+                    """,
+                    (failed_at, subscription_id),
+                )
+
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.database_path, timeout=5)
@@ -478,6 +657,12 @@ class MonitoringRepository:
         data = dict(row)
         data["status"] = NotificationStatus(data["status"])
         return NotificationDelivery(**data)
+
+    @staticmethod
+    def _push_subscription_from_row(row: sqlite3.Row) -> PushSubscription:
+        data = dict(row)
+        data["active"] = bool(data["active"])
+        return PushSubscription(**data)
 
     @staticmethod
     def _monitor_select() -> str:
