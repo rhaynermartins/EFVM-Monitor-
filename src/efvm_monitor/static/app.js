@@ -29,6 +29,7 @@ const elements = {
 let catalogReady = false;
 let stationsById = new Map();
 let previousStatus = null;
+let currentQuery = null;
 
 function apiErrorMessage(body, fallback) {
   if (typeof body?.detail === "string") return body.detail;
@@ -99,6 +100,7 @@ async function loadCatalog() {
     elements.travelDate.max = localDateValue(maximumDate);
 
     catalogReady = true;
+    applyQueryToForm(currentQuery);
     elements.catalogState.textContent = `${catalog.stations.length} estações disponíveis`;
     elements.catalogState.className = "catalog-state ready";
     setControls(false);
@@ -151,9 +153,23 @@ function formatTravelDate(value) {
   return `${day}/${month}/${year}`;
 }
 
+function applyQueryToForm(query) {
+  if (!catalogReady || !query) return;
+  elements.origin.value = String(query.origin);
+  elements.destination.value = String(query.destination);
+  elements.travelDate.value = query.travel_date;
+  elements.interval.value = String(query.check_interval_seconds);
+  const classOption = Array.from(elements.travelClass.options).find(
+    (item) => item.text === query.travel_class,
+  );
+  if (classOption) elements.travelClass.value = classOption.value;
+}
+
 function renderQuery(query) {
+  currentQuery = query;
   elements.querySummary.hidden = !query;
   if (!query) return;
+  applyQueryToForm(query);
   elements.summaryRoute.textContent = `${stationName(query.origin)} → ${stationName(query.destination)}`;
   elements.summaryDateClass.textContent = `${formatTravelDate(query.travel_date)} · ${query.travel_class} · 1 passageiro`;
   elements.summaryInterval.textContent = `${query.check_interval_seconds} segundos`;
