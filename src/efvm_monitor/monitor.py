@@ -9,14 +9,21 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
-import httpx
-
 from efvm_monitor.checker import AvailabilityStatus, EFVMClient
 from efvm_monitor.config import Settings
 from efvm_monitor.database import MonitoringRepository, MonitorStatus, PersistedMonitor
 from efvm_monitor.notifier import send_availability_alert
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _default_notifier(
+    settings: Settings,
+    result: Any,
+    _monitoring_id: int | None,
+    _detected_at: str,
+) -> None:
+    send_availability_alert(settings, result)
 
 
 class MonitorAlreadyRunning(RuntimeError):
@@ -44,7 +51,7 @@ class MonitorService:
     def __init__(
         self,
         client_factory: Callable[[Settings], EFVMClient] = EFVMClient,
-        notifier: Callable[[Settings, Any], None] = send_availability_alert,
+        notifier: Callable[[Settings, Any, int | None, str], None] = _default_notifier,
         repository: MonitoringRepository | None = None,
     ) -> None:
         self._client_factory = client_factory
@@ -188,16 +195,19 @@ class MonitorService:
             with self._client_factory(settings) as client:
                 while not stop_event.is_set():
                     result = client.check()
-                    self._set_result(result.status, result.message, monitoring_id)
+                    checked_at = self._set_result(result.status, result.message, monitoring_id)
                     became_available = (
                         result.status is AvailabilityStatus.TEM_VAGA
                         and previous_status is not result.status
                     )
                     if became_available:
                         try:
-                            self._notifier(settings, result)
-                        except httpx.HTTPError as exc:
-                            LOGGER.error("O alerta por webhook não foi enviado: %s", exc)
+                            self._notifier(settings, result, monitoring_id, checked_at)
+                        except Exception as exc:
+                            LOGGER.exception(
+                                "O alerta não foi processado; o monitor continuará: %s",
+                                exc,
+                            )
                     previous_status = result.status
                     if stop_event.wait(settings.check_interval_seconds):
                         break
@@ -226,7 +236,7 @@ class MonitorService:
         status: AvailabilityStatus,
         message: str,
         monitoring_id: int | None,
-    ) -> None:
+    ) -> str:
         checked_at = datetime.now().astimezone().isoformat(timespec="seconds")
         persisted: PersistedMonitor | None = None
         if self._repository is not None and monitoring_id is not None:
@@ -248,6 +258,7 @@ class MonitorService:
                 ),
                 query=self._snapshot.query,
             )
+        return checked_at
 
     def _set_runtime_error(self, message: str, monitoring_id: int | None) -> None:
         with self._lock:
@@ -271,6 +282,7 @@ class MonitorService:
             "travel_class": settings.travel_class,
             "passengers": settings.passengers,
             "check_interval_seconds": settings.check_interval_seconds,
+            "whatsapp_enabled": settings.whatsapp_enabled,
         }
 
     @staticmethod
@@ -282,6 +294,7 @@ class MonitorService:
             "travel_class": monitor.travel_class,
             "passengers": monitor.passengers,
             "check_interval_seconds": monitor.interval_seconds,
+            "whatsapp_enabled": monitor.whatsapp_enabled,
         }
 
     @staticmethod
