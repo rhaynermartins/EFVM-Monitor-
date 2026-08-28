@@ -35,6 +35,7 @@ const elements = {
   refreshHistory: document.querySelector("#refresh-history"),
   historyEmpty: document.querySelector("#history-empty"),
   historyList: document.querySelector("#history-list"),
+  logoutButton: document.querySelector("#logout-button"),
 };
 
 let catalogReady = false;
@@ -47,6 +48,7 @@ let pushConfig = null;
 let pushSubscribed = false;
 let deferredInstallPrompt = null;
 const pushDeviceId = getPushDeviceId();
+const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
 
 function getPushDeviceId() {
   const storageKey = "efvm-push-device-id";
@@ -70,13 +72,35 @@ function apiErrorMessage(body, fallback) {
 }
 
 async function fetchJson(url, options = {}) {
+  const method = (options.method || "GET").toUpperCase();
+  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  if (!["GET", "HEAD", "OPTIONS"].includes(method) && csrfToken) {
+    headers["X-CSRF-Token"] = csrfToken;
+  }
   const response = await fetch(url, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
+    method,
+    credentials: "same-origin",
+    headers,
   });
+  if (response.status === 401) {
+    window.location.assign("/login");
+    throw new Error("Sua sessão expirou. Entre novamente.");
+  }
   const body = await response.json();
   if (!response.ok) throw new Error(apiErrorMessage(body, "A solicitação não foi concluída."));
   return body;
+}
+
+async function logout() {
+  elements.logoutButton.disabled = true;
+  try {
+    await fetchJson("/api/auth/logout", { method: "POST" });
+    window.location.assign("/login");
+  } catch (error) {
+    setFormError(error.message);
+    elements.logoutButton.disabled = false;
+  }
 }
 
 function setFormError(message = "") {
@@ -582,6 +606,7 @@ async function refreshState() {
 elements.form.addEventListener("submit", startMonitoring);
 elements.stopButton.addEventListener("click", stopMonitoring);
 elements.refreshHistory.addEventListener("click", () => loadHistory(selectedMonitorId));
+elements.logoutButton?.addEventListener("click", logout);
 elements.activatePush.addEventListener("click", activatePush);
 elements.testPush.addEventListener("click", testPush);
 elements.disablePush.addEventListener("click", disablePush);
