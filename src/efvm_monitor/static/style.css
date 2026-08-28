@@ -278,6 +278,69 @@ a {
   border-color: rgb(23 107 77 / 24%);
 }
 
+.push-option {
+  cursor: default;
+}
+
+.push-symbol {
+  display: grid;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  color: white;
+  background: var(--green);
+  border-radius: 50%;
+  font-size: 0.9rem;
+  font-weight: 800;
+  place-items: center;
+}
+
+.push-copy {
+  min-width: 0;
+}
+
+.push-status {
+  display: block;
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 850;
+  letter-spacing: 0.045em;
+}
+
+.push-status[data-state="active"] {
+  color: var(--green-dark);
+}
+
+.push-status[data-state="attention"] {
+  color: var(--yellow);
+}
+
+.push-status[data-state="unavailable"] {
+  color: var(--red);
+}
+
+.push-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 8px;
+}
+
+.push-actions .text-button:disabled {
+  opacity: 0.5;
+}
+
+.ios-install-help {
+  display: block;
+  margin-top: 9px;
+  padding: 9px 10px;
+  color: #394a42;
+  background: rgb(255 255 255 / 72%);
+  border-radius: 8px;
+  font-size: 0.73rem;
+}
+
 .notification-option em {
   margin-left: 5px;
   padding: 3px 6px;
@@ -631,6 +694,15 @@ footer {
 
   .form-actions {
     flex-direction: column;
+  }
+
+  .push-option {
+    padding: 13px;
+  }
+
+  .notification-option em {
+    display: inline-block;
+    margin-top: 4px;
   }
 
   .button {
