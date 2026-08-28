@@ -67,6 +67,12 @@ class MonitorService:
             persisted: PersistedMonitor | None = None
             if self._repository is not None:
                 if monitoring_id is None:
+                    previous_monitoring_id = self._snapshot.monitoring_id
+                    if previous_monitoring_id is not None:
+                        self._repository.set_status(
+                            previous_monitoring_id,
+                            MonitorStatus.PAUSED,
+                        )
                     persisted = self._repository.create_monitor(settings)
                     monitoring_id = persisted.id
                 else:
