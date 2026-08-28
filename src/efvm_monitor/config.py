@@ -33,6 +33,15 @@ def _integer(name: str, default: int, minimum: int, maximum: int | None = None) 
     return value
 
 
+def _boolean(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name, str(default)).strip().casefold()
+    if raw_value in {"1", "true", "sim", "yes", "on"}:
+        return True
+    if raw_value in {"0", "false", "não", "nao", "no", "off"}:
+        return False
+    raise ConfigurationError(f"{name} deve ser verdadeiro ou falso.")
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """Configuração validada de uma consulta de disponibilidade."""
@@ -48,6 +57,9 @@ class Settings:
     base_url: str
     railway_code: str
     alert_webhook_url: str | None
+    whatsapp_enabled: bool = False
+    origin_label: str | None = None
+    destination_label: str | None = None
 
     @classmethod
     def for_query(
@@ -64,6 +76,9 @@ class Settings:
         base_url: str = "https://tremdepassageiros.vale.com/sgpweb/rest",
         railway_code: str = "03",
         alert_webhook_url: str | None = None,
+        whatsapp_enabled: bool = False,
+        origin_label: str | None = None,
+        destination_label: str | None = None,
     ) -> Settings:
         """Cria uma configuração a partir de dados já recebidos pela aplicação."""
         normalized_origin = origin.strip()
@@ -103,6 +118,9 @@ class Settings:
             base_url=normalized_url,
             railway_code=railway_code.strip() or "03",
             alert_webhook_url=(alert_webhook_url or "").strip() or None,
+            whatsapp_enabled=whatsapp_enabled,
+            origin_label=(origin_label or "").strip() or None,
+            destination_label=(destination_label or "").strip() or None,
         )
 
     @classmethod
@@ -144,4 +162,7 @@ class Settings:
             base_url=base_url.rstrip("/"),
             railway_code=os.getenv("EFVM_RAILWAY_CODE", "03").strip() or "03",
             alert_webhook_url=webhook,
+            whatsapp_enabled=_boolean("WHATSAPP_ENABLED", True),
+            origin_label=origin,
+            destination_label=destination,
         )
