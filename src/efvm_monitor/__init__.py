@@ -4,4 +4,4 @@ from efvm_monitor.checker import AvailabilityResult, AvailabilityStatus, EFVMCli
 from efvm_monitor.config import Settings
 
 __all__ = ["AvailabilityResult", "AvailabilityStatus", "EFVMClient", "Settings"]
-__version__ = "0.3.0"
+__version__ = "0.4.0"
