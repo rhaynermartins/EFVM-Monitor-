@@ -175,6 +175,10 @@ a {
   margin-bottom: 26px;
 }
 
+.status-panel {
+  overflow: hidden;
+}
+
 .panel-heading h2 {
   margin: 0;
   font-size: 1.35rem;
