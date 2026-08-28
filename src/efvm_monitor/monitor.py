@@ -11,7 +11,12 @@ from typing import Any
 
 from efvm_monitor.checker import AvailabilityStatus, EFVMClient
 from efvm_monitor.config import Settings
-from efvm_monitor.database import MonitoringRepository, MonitorStatus, PersistedMonitor
+from efvm_monitor.database import (
+    LEGACY_USER_ID,
+    MonitoringRepository,
+    MonitorStatus,
+    PersistedMonitor,
+)
 from efvm_monitor.notifier import send_availability_alert
 
 LOGGER = logging.getLogger(__name__)
@@ -61,11 +66,13 @@ class MonitorService:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._snapshot = MonitorSnapshot()
+        self._user_id = LEGACY_USER_ID
 
     def start(
         self,
         settings: Settings,
         monitoring_id: int | None = None,
+        user_id: int = LEGACY_USER_ID,
     ) -> MonitorSnapshot:
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
@@ -80,12 +87,15 @@ class MonitorService:
                             previous_monitoring_id,
                             MonitorStatus.PAUSED,
                         )
-                    persisted = self._repository.create_monitor(settings)
+                    persisted = self._repository.create_monitor(settings, user_id=user_id)
                     monitoring_id = persisted.id
                 else:
                     self._repository.set_status(monitoring_id, MonitorStatus.ACTIVE)
-                    persisted = self._repository.get_monitor(monitoring_id)
+                    persisted = self._repository.get_monitor(monitoring_id, user_id=user_id)
+                    if persisted is None:
+                        raise LookupError(f"Monitoramento {monitoring_id} não encontrado.")
 
+            self._user_id = user_id
             previous_status = self._availability_status(
                 persisted.last_result if persisted is not None else None
             )
@@ -152,7 +162,11 @@ class MonitorService:
     ) -> MonitorSnapshot:
         if monitor.active:
             if settings is not None:
-                return self.start(settings, monitoring_id=monitor.id)
+                return self.start(
+                    settings,
+                    monitoring_id=monitor.id,
+                    user_id=monitor.user_id,
+                )
             restored_status = AvailabilityStatus.ERRO.value
             restored_message = "O monitor salvo precisa de uma configuração válida para retomar."
         else:
@@ -160,6 +174,7 @@ class MonitorService:
             restored_message = "Monitoramento recuperado do banco local."
 
         with self._lock:
+            self._user_id = monitor.user_id
             self._snapshot = MonitorSnapshot(
                 monitoring_id=monitor.id,
                 status=restored_status,
@@ -174,9 +189,13 @@ class MonitorService:
     def history(self, limit: int = 100) -> list[dict[str, Any]]:
         with self._lock:
             monitoring_id = self._snapshot.monitoring_id
+            user_id = self._user_id
         if self._repository is None or monitoring_id is None:
             return []
-        return [entry.to_dict() for entry in self._repository.history(monitoring_id, limit)]
+        return [
+            entry.to_dict()
+            for entry in self._repository.history(monitoring_id, limit, user_id=user_id)
+        ]
 
     def shutdown(self) -> None:
         self._stop_event.set()
@@ -241,7 +260,7 @@ class MonitorService:
         persisted: PersistedMonitor | None = None
         if self._repository is not None and monitoring_id is not None:
             self._repository.record_check(monitoring_id, status, message, checked_at)
-            persisted = self._repository.get_monitor(monitoring_id)
+            persisted = self._repository.get_monitor_internal(monitoring_id)
 
         with self._lock:
             self._snapshot = MonitorSnapshot(
