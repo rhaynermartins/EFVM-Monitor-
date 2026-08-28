@@ -134,6 +134,8 @@ class SMSConfig:
         return self.dry_run or bool(self.account_sid and self.auth_token and self.from_number)
 
     def validate(self) -> None:
+        if not self.enabled:
+            raise SMSConfigurationError("SMS desabilitado por SMS_ENABLED=false.")
         if self.provider != "twilio":
             raise SMSConfigurationError("SMS_PROVIDER deve ser twilio nesta fase.")
         normalize_e164(self.recipient_phone)
