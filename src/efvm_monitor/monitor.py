@@ -138,15 +138,19 @@ class MonitorService:
         settings: Settings | None = None,
     ) -> MonitorSnapshot:
         if monitor.active:
-            if settings is None:
-                raise ValueError("A configuração é obrigatória para retomar um monitor ativo.")
-            return self.start(settings, monitoring_id=monitor.id)
+            if settings is not None:
+                return self.start(settings, monitoring_id=monitor.id)
+            restored_status = AvailabilityStatus.ERRO.value
+            restored_message = "O monitor salvo precisa de uma configuração válida para retomar."
+        else:
+            restored_status = "PARADO"
+            restored_message = "Monitoramento recuperado do banco local."
 
         with self._lock:
             self._snapshot = MonitorSnapshot(
                 monitoring_id=monitor.id,
-                status="PARADO",
-                message="Monitoramento recuperado do banco local.",
+                status=restored_status,
+                message=restored_message,
                 checked_at=monitor.last_checked_at,
                 last_result=monitor.last_result,
                 availability_changed_at=monitor.availability_changed_at,
