@@ -46,6 +46,7 @@ class PersistedMonitor:
     sms_enabled: bool = False
     origin_label: str | None = None
     destination_label: str | None = None
+    removed_at: str | None = None
 
     @property
     def active(self) -> bool:
@@ -236,7 +237,7 @@ class MonitoringRepository:
     def get_monitor(self, monitoring_id: int) -> PersistedMonitor | None:
         with self._connect() as connection:
             row = connection.execute(
-                f"{self._monitor_select()} WHERE m.id = ?",
+                f"{self._monitor_select()} WHERE m.id = ? AND m.removed_at IS NULL",
                 (monitoring_id,),
             ).fetchone()
         return self._monitor_from_row(row) if row is not None else None
@@ -246,7 +247,7 @@ class MonitoringRepository:
             row = connection.execute(
                 f"""
                 {self._monitor_select()}
-                WHERE m.status = ?
+                WHERE m.status = ? AND m.removed_at IS NULL
                 ORDER BY m.updated_at DESC, m.id DESC
                 LIMIT 1
                 """,
@@ -259,6 +260,7 @@ class MonitoringRepository:
             row = connection.execute(
                 f"""
                 {self._monitor_select()}
+                WHERE m.removed_at IS NULL
                 ORDER BY m.updated_at DESC, m.id DESC
                 LIMIT 1
                 """
@@ -268,16 +270,38 @@ class MonitoringRepository:
     def list_monitors(self) -> list[PersistedMonitor]:
         with self._connect() as connection:
             rows = connection.execute(
-                f"{self._monitor_select()} ORDER BY m.created_at DESC, m.id DESC"
+                f"""
+                {self._monitor_select()}
+                WHERE m.removed_at IS NULL
+                ORDER BY m.created_at DESC, m.id DESC
+                """
             ).fetchall()
         return [self._monitor_from_row(row) for row in rows]
 
     def set_status(self, monitoring_id: int, status: MonitorStatus) -> None:
         with self._connect() as connection:
             connection.execute(
-                "UPDATE monitoring_jobs SET status = ?, updated_at = ? WHERE id = ?",
+                """
+                UPDATE monitoring_jobs
+                SET status = ?, updated_at = ?
+                WHERE id = ? AND removed_at IS NULL
+                """,
                 (int(status), self._now(), monitoring_id),
             )
+
+    def remove_monitor(self, monitoring_id: int) -> bool:
+        """Oculta um monitor sem apagar configuração, histórico ou entregas."""
+        now = self._now()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE monitoring_jobs
+                SET status = ?, removed_at = ?, updated_at = ?
+                WHERE id = ? AND removed_at IS NULL
+                """,
+                (int(MonitorStatus.PAUSED), now, now, monitoring_id),
+            )
+        return cursor.rowcount > 0
 
     def record_check(
         self,
@@ -291,7 +315,7 @@ class MonitoringRepository:
                 """
                 SELECT last_result, availability_changed_at
                 FROM monitoring_jobs
-                WHERE id = ?
+                WHERE id = ? AND removed_at IS NULL
                 """,
                 (monitoring_id,),
             ).fetchone()
@@ -320,6 +344,7 @@ class MonitoringRepository:
                 SET last_result = ?, last_message = ?, last_checked_at = ?,
                     availability_changed_at = ?, updated_at = ?
                 WHERE id = ?
+                  AND removed_at IS NULL
                 """,
                 (
                     result.value,
@@ -650,6 +675,7 @@ class MonitoringRepository:
             sms_enabled=bool(row["sms_enabled"]),
             origin_label=row["origin_label"],
             destination_label=row["destination_label"],
+            removed_at=row["removed_at"],
         )
 
     @staticmethod
