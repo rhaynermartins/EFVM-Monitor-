@@ -21,6 +21,9 @@ const elements = {
   summaryRoute: document.querySelector("#summary-route"),
   summaryDateClass: document.querySelector("#summary-date-class"),
   summaryInterval: document.querySelector("#summary-interval"),
+  refreshHistory: document.querySelector("#refresh-history"),
+  historyEmpty: document.querySelector("#history-empty"),
+  historyList: document.querySelector("#history-list"),
 };
 
 let catalogReady = false;
@@ -182,6 +185,41 @@ function renderState(state) {
   previousStatus = state.status;
 }
 
+function renderHistory(items) {
+  elements.historyList.replaceChildren();
+  elements.historyEmpty.hidden = items.length > 0;
+  items.forEach((entry) => {
+    const item = document.createElement("li");
+    item.className = "history-item";
+
+    const result = document.createElement("span");
+    result.className = `history-result history-result-${entry.result.toLowerCase().replaceAll("_", "-")}`;
+    result.textContent = entry.result;
+
+    const details = document.createElement("div");
+    details.className = "history-details";
+    const message = document.createElement("strong");
+    message.textContent = entry.message;
+    const checkedAt = document.createElement("time");
+    checkedAt.dateTime = entry.checked_at;
+    checkedAt.textContent = new Date(entry.checked_at).toLocaleString("pt-BR");
+    details.append(message, checkedAt);
+    item.append(result, details);
+    elements.historyList.append(item);
+  });
+}
+
+async function loadHistory() {
+  try {
+    const history = await fetchJson("/api/monitoramento/historico?limit=10");
+    renderHistory(history.items);
+  } catch (error) {
+    elements.historyList.replaceChildren();
+    elements.historyEmpty.hidden = false;
+    elements.historyEmpty.textContent = `Histórico indisponível: ${error.message}`;
+  }
+}
+
 async function requestNotificationPermission() {
   if (!elements.notifications.checked || !("Notification" in window)) return;
   if (Notification.permission === "default") await Notification.requestPermission();
@@ -229,6 +267,7 @@ async function stopMonitoring() {
 async function refreshState() {
   try {
     renderState(await fetchJson("/api/monitoramento"));
+    await loadHistory();
   } catch (error) {
     setFormError(`Não foi possível atualizar o estado: ${error.message}`);
   }
@@ -236,6 +275,7 @@ async function refreshState() {
 
 elements.form.addEventListener("submit", startMonitoring);
 elements.stopButton.addEventListener("click", stopMonitoring);
+elements.refreshHistory.addEventListener("click", loadHistory);
 
 Promise.all([loadCatalog(), refreshState()]).finally(() => {
   window.setInterval(refreshState, 3000);
