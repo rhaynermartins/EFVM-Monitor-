@@ -4,7 +4,7 @@ Prova de conceito em Python para consultar a disponibilidade de passagens do Tre
 Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O projeto
 **não compra passagem** e não acessa etapas de login, CPF, reserva, assento ou pagamento.
 
-## Escopo atual — Fases 1, 2, 3, 4 e 4.1
+## Escopo atual — Fases 1, 2, 3, 4, 4.1 e 4.2
 
 - configurar origem, destino, data, classe e quantidade de passageiros em `.env`;
 - consultar somente interfaces públicas usadas antes do fluxo de compra;
@@ -14,11 +14,12 @@ Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O pr
 - executar uma vez ou repetir a consulta em intervalo controlado.
 - escolher origem, destino, data e classe em uma interface local;
 - iniciar, acompanhar e parar um único monitoramento pelo navegador;
-- emitir, opcionalmente, uma notificação nativa do navegador.
+- instalar a interface como PWA e receber Web Push padrão mesmo com a página fechada;
 - persistir a configuração e o estado em SQLite local;
 - registrar o histórico de `TEM_VAGA`, `SEM_VAGA` e `ERRO`;
 - recuperar o último monitor salvo e retomar automaticamente o que estava ativo.
-- enviar alerta SMS pela Twilio quando o estado muda para `TEM_VAGA`;
+- usar Web Push com VAPID como canal principal gratuito;
+- manter SMS/Twilio e WhatsApp Cloud API como canais opcionais, desativados por padrão;
 - evitar mensagens repetidas enquanto a disponibilidade continuar `TEM_VAGA`;
 - registrar tentativas, sucessos e falhas dos alertas no SQLite;
 - manter o monitor funcionando mesmo quando um canal estiver indisponível.
@@ -94,8 +95,10 @@ Abra [http://127.0.0.1:8000](http://127.0.0.1:8000) no navegador. A tela permite
 - escolher intervalos a partir de 60 segundos;
 - iniciar e parar o monitoramento;
 - acompanhar `AGUARDANDO`, `TEM_VAGA`, `SEM_VAGA`, `ERRO` e `PARADO`;
-- ativar o SMS como alerta principal, quando configurado;
-- ativar a notificação complementar do navegador;
+- instalar a PWA em navegadores compatíveis;
+- ativar Web Push explicitamente neste dispositivo, sem pedido automático de permissão;
+- testar ou desativar o Web Push pela própria tela;
+- ativar SMS e WhatsApp como alternativas opcionais, quando configurados;
 - consultar as verificações recentes persistidas no painel.
 
 O fluxo visual segue a ordem de uso: primeiro aparece **PASSO 1 — Configure a viagem** e,
@@ -104,6 +107,11 @@ acompanhamento nunca é movido para antes da configuração.
 
 O servidor escuta apenas em `127.0.0.1` e não fica exposto à rede local. Para usar outra
 porta, altere `EFVM_WEB_PORT` no `.env`.
+
+Em desktop, `localhost`/`127.0.0.1` é aceito pelos navegadores como contexto seguro de
+desenvolvimento. Para instalar e testar em um telefone físico, o aparelho precisa acessar o
+servidor por uma URL HTTPS válida. A publicação contínua e sua configuração de HTTPS ficam
+fora desta fase; não exponha o servidor de desenvolvimento diretamente na internet.
 
 O estado é persistido no caminho definido por `EFVM_DATABASE_PATH`, cujo padrão é
 `data/efvm-monitor.db`. Ao reiniciar o servidor, o último monitor é recuperado. Se ele estava
@@ -121,6 +129,8 @@ Tabelas atuais:
 - `check_history`: uma linha para cada verificação concluída;
 - `monitoring_notification_preferences`: preferência do WhatsApp e nomes exibidos no alerta;
 - `notification_deliveries`: tentativas, resultado, canal e situação dos envios;
+- `push_subscriptions`: endpoint e chaves públicas de cada navegador/dispositivo;
+- `monitoring_push_subscriptions`: vínculo entre dispositivo e monitoramento, sem broadcast;
 - `schema_migrations`: versões de schema já aplicadas.
 
 O status do monitor é numérico no banco:
@@ -189,14 +199,50 @@ No modo contínuo, o alerta é emitido quando o estado muda para `TEM_VAGA`. Enq
 `TEM_VAGA`, nenhuma nova mensagem é enviada. Depois de `TEM_VAGA → SEM_VAGA → TEM_VAGA`, um
 novo alerta pode ser enviado.
 
-## SMS via Twilio — canal principal
+## Web Push — canal principal gratuito
 
-O SMS é o canal principal do MVP. A integração usa a API REST oficial da Twilio por meio do
+A Fase 4.2 usa os padrões Service Worker, Push API, Notifications API e VAPID por meio do
+`pywebpush`. Não usa Firebase e não envia a chave privada ao navegador.
+
+Gere um par de chaves uma única vez:
+
+```bash
+efvm-monitor generate-vapid-keys
+```
+
+Copie o resultado para seu `.env` e informe um contato do responsável pelo servidor:
+
+```dotenv
+WEB_PUSH_ENABLED=true
+VAPID_PUBLIC_KEY=chave_publica_gerada
+VAPID_PRIVATE_KEY=chave_privada_gerada
+VAPID_SUBJECT=mailto:seu-email@example.com
+WEB_PUSH_MAX_ATTEMPTS=3
+WEB_PUSH_TIMEOUT_SECONDS=15
+```
+
+Nunca publique `VAPID_PRIVATE_KEY`. O endpoint `/api/push/config` entrega somente a chave
+pública. A inscrição só ocorre depois do clique em **Ativar alertas**. Cada dispositivo recebe
+um ID local não sensível e sua subscription fica no SQLite; ao iniciar um monitoramento, apenas
+os dispositivos vinculados a ele recebem o alerta.
+
+No Android/Chrome, use **Instalar aplicativo** quando o navegador oferecer essa ação. No
+iPhone/iPad, abra no Safari, use **Compartilhar → Adicionar à Tela de Início**, abra o aplicativo
+instalado e então toque em **Ativar alertas**. Web Push no iOS depende desse modo instalado.
+
+Os estados da tela distinguem canal pronto, ativo, bloqueado, não suportado, sem HTTPS e
+instalação necessária. O botão **Enviar teste** valida o dispositivo sem consultar passagens.
+Endpoints expirados com HTTP `404` ou `410` são desativados. HTTP `429` e respostas `5xx` usam
+tentativas limitadas; nenhuma falha de push encerra o monitor.
+
+## SMS via Twilio — opcional
+
+O SMS é uma alternativa opcional e pode gerar custos. A integração usa a API REST oficial da Twilio por meio do
 `httpx` já instalado, sem dependência adicional. Crie uma conta no
 [Twilio Console](https://console.twilio.com/), obtenha um número habilitado para SMS e preencha:
 
 ```dotenv
-SMS_ENABLED=true
+SMS_ENABLED=false
 SMS_PROVIDER=twilio
 TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TWILIO_AUTH_TOKEN=seu_token
@@ -215,7 +261,8 @@ Teste sem depender de passagem disponível:
 efvm-monitor test-sms
 ```
 
-Antes do primeiro envio real, use `SMS_DRY_RUN=true`. Nesse modo a mensagem, validação,
+Para habilitar o canal, altere `SMS_ENABLED=true`. Antes do primeiro envio real, use
+`SMS_DRY_RUN=true`. Nesse modo a mensagem, validação,
 deduplicação e persistência são exercitadas, mas a Twilio não é chamada. Para desativar o canal,
 use `SMS_ENABLED=false`.
 
@@ -223,7 +270,7 @@ O destinatário é exibido e salvo apenas de forma mascarada. O Auth Token nunca
 registrado em log. Falhas de autenticação, saldo, HTTP, timeout ou indisponibilidade ficam
 registradas como falha de entrega e não encerram o monitor.
 
-## WhatsApp Cloud API — complementar
+## WhatsApp Cloud API — opcional
 
 O canal complementar usa exclusivamente a
 [WhatsApp Cloud API oficial da Meta](https://developers.facebook.com/docs/whatsapp/cloud-api/).
@@ -284,8 +331,9 @@ ruff check .
 
 Os testes locais verificam a classificação dos três estados, migrations idempotentes,
 persistência, histórico, retomada após reinicialização, deduplicação de alertas, retry,
-continuidade após falha de notificação, serviço em segundo plano, rotas e validações do
-formulário. Eles não fazem chamadas ao portal nem enviam mensagens reais.
+continuidade após falha de notificação, subscriptions Web Push, invalidação `404`/`410`,
+proteção da chave VAPID privada, service worker, serviço em segundo plano, rotas e validações
+do formulário. Eles não fazem chamadas ao portal nem enviam mensagens reais.
 
 ## Rotas locais
 
@@ -297,6 +345,13 @@ formulário. Eles não fazem chamadas ao portal nem enviam mensagens reais.
 | `GET` | `/api/monitoramento` | Consulta o estado atual |
 | `GET` | `/api/monitoramento/historico` | Consulta o histórico do monitor atual |
 | `DELETE` | `/api/monitoramento` | Solicita a parada |
+| `GET` | `/api/push/config` | Entrega apenas a configuração pública do Web Push |
+| `GET` | `/api/push/status` | Consulta o vínculo do dispositivo atual |
+| `POST` | `/api/push/subscribe` | Salva e vincula uma subscription |
+| `POST` | `/api/push/unsubscribe` | Desativa uma subscription sem apagar histórico |
+| `POST` | `/api/push/test` | Envia uma notificação de teste ao dispositivo |
+| `GET` | `/manifest.webmanifest` | Entrega o manifesto da PWA |
+| `GET` | `/service-worker.js` | Entrega o service worker no escopo raiz |
 
 ## Estrutura
 
@@ -310,8 +365,9 @@ src/efvm_monitor/
 ├── monitor.py   # ciclo em segundo plano, persistência e retomada
 ├── network.py   # HTTPS verificado com certificados do sistema
 ├── notifier.py  # SMS/Twilio, WhatsApp, retry e canais complementares
+├── web_push.py  # VAPID, payload, retry e invalidação de subscriptions
 ├── web.py       # servidor e rotas locais
-├── static/      # estilos e interação do formulário
+├── static/      # manifesto, service worker, ícones, estilos e interação
 └── templates/   # página HTML
 tests/
 ├── test_checker.py
@@ -320,7 +376,9 @@ tests/
 ├── test_monitor.py
 ├── test_notifier.py
 ├── test_sms.py
-└── test_web.py
+├── test_web.py
+├── test_web_push.py
+└── test_web_push_api.py
 ```
 
 ## Limitações conhecidas
@@ -336,6 +394,10 @@ tests/
 - múltiplos monitoramentos simultâneos continuam reservados para a Fase 5.
 - o envio real depende de uma conta Meta válida, destinatário permitido e, quando aplicável,
   template aprovado;
+- o Web Push depende do suporte do navegador, de permissão explícita e de HTTPS fora do
+  ambiente local de desktop;
+- validação em aparelhos físicos não pode ser substituída pelos testes automatizados e deve
+  ser realizada quando houver uma URL HTTPS acessível ao iPhone ou Android;
 
 ## Uso responsável
 
