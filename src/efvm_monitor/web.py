@@ -40,6 +40,7 @@ class MonitoringRequest(BaseModel):
     passengers: Literal[1] = 1
     interval_seconds: int = Field(default=300, ge=60, le=86_400)
     whatsapp_enabled: bool = False
+    sms_enabled: bool = False
 
 
 class CatalogCache:
@@ -79,6 +80,7 @@ def _settings_for_query(
     whatsapp_enabled: bool = False,
     origin_label: str | None = None,
     destination_label: str | None = None,
+    sms_enabled: bool = False,
 ) -> Settings:
     return Settings.for_query(
         origin=origin,
@@ -97,6 +99,7 @@ def _settings_for_query(
         whatsapp_enabled=whatsapp_enabled,
         origin_label=origin_label,
         destination_label=destination_label,
+        sms_enabled=sms_enabled,
     )
 
 
@@ -154,7 +157,7 @@ def create_app(
     application = FastAPI(
         title="EFVM Monitor",
         description="Interface local de consulta de disponibilidade, sem compra de passagem.",
-        version="0.4.0",
+        version="0.4.1",
         lifespan=lifespan,
     )
     application.mount(
@@ -174,6 +177,8 @@ def create_app(
                     "https://tremdepassageiros.vale.com/sgpweb/portal/index.html#/home"
                 ),
                 "whatsapp_configured": notifications.whatsapp_configured,
+                "sms_configured": notifications.sms_configured,
+                "sms_recipient_masked": notifications.sms_recipient_masked,
             },
         )
 
@@ -201,6 +206,7 @@ def create_app(
                 whatsapp_enabled=payload.whatsapp_enabled,
                 origin_label=labels[0],
                 destination_label=labels[1],
+                sms_enabled=payload.sms_enabled,
             )
             return monitor_service.start(settings).to_dict()
         except ConfigurationError as exc:
