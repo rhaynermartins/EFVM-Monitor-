@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Acesso ao EFVM Monitor">
+    <meta name="theme-color" content="#176b4d">
+    <title>{{ 'Criar conta' if mode == 'register' else 'Entrar' }} · EFVM Monitor</title>
+    <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+    <script defer src="{{ url_for('static', path='/auth.js') }}"></script>
+  </head>
+  <body data-auth-mode="{{ mode }}">
+    <header class="site-header">
+      <div class="header-content">
+        <a class="brand" href="/" aria-label="Página inicial do EFVM Monitor">
+          <span class="brand-mark" aria-hidden="true">EF</span>
+          <span>
+            <strong>EFVM Monitor</strong>
+            <small>Disponibilidade de passagens</small>
+          </span>
+        </a>
+        <a
+          class="official-link"
+          href="{{ official_portal_url }}"
+          target="_blank"
+          rel="noreferrer"
+        >Abrir portal oficial</a>
+      </div>
+    </header>
+
+    <main class="auth-shell">
+      <section class="panel auth-panel" aria-labelledby="auth-title">
+        <p class="eyebrow">Seu espaço protegido</p>
+        {% if mode == 'register' %}
+          <h1 id="auth-title">Crie sua conta</h1>
+          <p class="auth-intro">
+            Seus monitoramentos, histórico e dispositivos ficarão separados dos demais usuários.
+          </p>
+        {% else %}
+          <h1 id="auth-title">Entre no EFVM Monitor</h1>
+          <p class="auth-intro">
+            Continue acompanhando somente as viagens e notificações da sua conta.
+          </p>
+        {% endif %}
+
+        <form id="auth-form" class="auth-form">
+          {% if mode == 'register' %}
+            <label class="field">
+              <span>Nome</span>
+              <input
+                id="auth-name"
+                name="name"
+                type="text"
+                minlength="2"
+                maxlength="80"
+                autocomplete="name"
+                required
+              >
+            </label>
+          {% endif %}
+
+          <label class="field">
+            <span>E-mail</span>
+            <input
+              id="auth-email"
+              name="email"
+              type="email"
+              maxlength="254"
+              autocomplete="email"
+              inputmode="email"
+              required
+            >
+          </label>
+
+          <label class="field">
+            <span>Senha</span>
+            <input
+              id="auth-password"
+              name="password"
+              type="password"
+              minlength="10"
+              maxlength="128"
+              autocomplete="{{ 'new-password' if mode == 'register' else 'current-password' }}"
+              required
+            >
+            {% if mode == 'register' %}
+              <small>Use pelo menos 10 caracteres.</small>
+            {% endif %}
+          </label>
+
+          <p id="auth-error" class="form-error" role="alert" hidden></p>
+          <button id="auth-submit" class="button button-primary" type="submit">
+            {{ 'Criar conta' if mode == 'register' else 'Entrar' }}
+          </button>
+        </form>
+
+        <p class="auth-switch">
+          {% if mode == 'register' %}
+            Já possui uma conta? <a href="/login">Entrar</a>
+          {% else %}
+            Ainda não possui conta? <a href="/cadastro">Criar conta</a>
+          {% endif %}
+        </p>
+
+        <div class="scope-note">
+          <strong>O EFVM Monitor não compra passagens.</strong>
+          <p>Ele apenas consulta a disponibilidade e envia alertas.</p>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
