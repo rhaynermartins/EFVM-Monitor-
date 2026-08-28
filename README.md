@@ -4,7 +4,7 @@ Prova de conceito em Python para consultar a disponibilidade de passagens do Tre
 Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O projeto
 **não compra passagem** e não acessa etapas de login, CPF, reserva, assento ou pagamento.
 
-## Escopo atual — Fases 1 e 2
+## Escopo atual — Fases 1, 2 e 3
 
 - configurar origem, destino, data, classe e quantidade de passageiros em `.env`;
 - consultar somente interfaces públicas usadas antes do fluxo de compra;
@@ -15,6 +15,9 @@ Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O pr
 - escolher origem, destino, data e classe em uma interface local;
 - iniciar, acompanhar e parar um único monitoramento pelo navegador;
 - emitir, opcionalmente, uma notificação nativa do navegador.
+- persistir a configuração e o estado em SQLite local;
+- registrar o histórico de `TEM_VAGA`, `SEM_VAGA` e `ERRO`;
+- recuperar o último monitor salvo e retomar automaticamente o que estava ativo.
 
 Não fazem parte deste MVP: login, dados pessoais, escolha ou bloqueio de assento, reserva,
 pagamento, compra, solução de CAPTCHA e qualquer tentativa de contornar bloqueios ou
@@ -88,11 +91,34 @@ Abra [http://127.0.0.1:8000](http://127.0.0.1:8000) no navegador. A tela permite
 - iniciar e parar o monitoramento;
 - acompanhar `AGUARDANDO`, `TEM_VAGA`, `SEM_VAGA`, `ERRO` e `PARADO`;
 - ativar notificação do navegador quando aparecer uma vaga.
+- consultar as verificações recentes persistidas no painel.
 
 O servidor escuta apenas em `127.0.0.1` e não fica exposto à rede local. Para usar outra
 porta, altere `EFVM_WEB_PORT` no `.env`.
 
-O estado fica somente em memória. Encerrar o servidor encerra o monitoramento ativo.
+O estado é persistido no caminho definido por `EFVM_DATABASE_PATH`, cujo padrão é
+`data/efvm-monitor.db`. Ao reiniciar o servidor, o último monitor é recuperado. Se ele estava
+ativo, a consulta é retomada automaticamente; se estava pausado, permanece parada.
+
+## Persistência local
+
+O SQLite é inicializado automaticamente por uma migration idempotente. A inicialização usa
+somente `CREATE TABLE IF NOT EXISTS` e `CREATE INDEX IF NOT EXISTS`: não há `DROP`, `DELETE`
+ou limpeza automática de dados.
+
+Tabelas atuais:
+
+- `monitoring_jobs`: configuração, estado, último resultado e datas relevantes;
+- `check_history`: uma linha para cada verificação concluída;
+- `schema_migrations`: versões de schema já aplicadas.
+
+O status do monitor é numérico no banco:
+
+- `0 = pausado`;
+- `1 = ativo`.
+
+O SQL fica centralizado em `database.py` e nos arquivos de `migrations/`. Os valores recebidos
+do usuário são enviados ao SQLite por parâmetros, sem concatenação na consulta.
 
 ## Execução pelo terminal
 
@@ -152,8 +178,9 @@ pytest
 ruff check .
 ```
 
-Os testes locais verificam a classificação dos três estados, o serviço em segundo plano, as
-cinco rotas da interface e as validações do formulário. Eles não fazem chamadas ao portal.
+Os testes locais verificam a classificação dos três estados, migrations idempotentes,
+persistência, histórico, retomada após reinicialização, serviço em segundo plano, rotas e
+validações do formulário. Eles não fazem chamadas ao portal.
 
 ## Rotas locais
 
@@ -163,6 +190,7 @@ cinco rotas da interface e as validações do formulário. Eles não fazem chama
 | `GET` | `/api/catalogo` | Lista estações, classes e janela de venda |
 | `POST` | `/api/monitoramento` | Inicia um monitoramento |
 | `GET` | `/api/monitoramento` | Consulta o estado atual |
+| `GET` | `/api/monitoramento/historico` | Consulta o histórico do monitor atual |
 | `DELETE` | `/api/monitoramento` | Solicita a parada |
 
 ## Estrutura
@@ -172,7 +200,9 @@ src/efvm_monitor/
 ├── checker.py   # catálogos públicos, consulta e classificação
 ├── cli.py       # execução única/contínua e logs
 ├── config.py    # leitura e validação do .env
-├── monitor.py   # ciclo em segundo plano e estado em memória
+├── database.py  # camada exclusiva de acesso ao SQLite
+├── migrations/  # evolução idempotente do schema local
+├── monitor.py   # ciclo em segundo plano, persistência e retomada
 ├── network.py   # HTTPS verificado com certificados do sistema
 ├── notifier.py  # alerta local e webhook opcional
 ├── web.py       # servidor e rotas locais
@@ -180,6 +210,7 @@ src/efvm_monitor/
 └── templates/   # página HTML
 tests/
 ├── test_checker.py
+├── test_database.py
 ├── test_monitor.py
 └── test_web.py
 ```
@@ -193,7 +224,8 @@ tests/
 - uma resposta inesperada é classificada como `ERRO`, nunca como ausência de vaga;
 - o monitor depende da janela de venda informada dinamicamente pelo portal.
 - somente um monitoramento pode ficar ativo por processo;
-- o monitoramento não é retomado automaticamente após fechar o servidor.
+- uma configuração salva cuja data já expirou é recuperada como `ERRO` e não é iniciada;
+- múltiplos monitoramentos simultâneos continuam reservados para a Fase 5.
 
 ## Uso responsável
 
