@@ -25,6 +25,28 @@ class FakeClient:
         return AvailabilityResult(AvailabilityStatus.TEM_VAGA, "Uma opção disponível.", 1)
 
 
+class TransitionClient(FakeClient):
+    def __init__(self, settings: Settings) -> None:
+        super().__init__(settings)
+        self.statuses = [
+            AvailabilityStatus.SEM_VAGA,
+            AvailabilityStatus.TEM_VAGA,
+            AvailabilityStatus.TEM_VAGA,
+            AvailabilityStatus.SEM_VAGA,
+            AvailabilityStatus.TEM_VAGA,
+        ]
+
+    def check(self) -> AvailabilityResult:
+        index = min(self.checks, len(self.statuses) - 1)
+        status = self.statuses[index]
+        self.checks += 1
+        return AvailabilityResult(
+            status,
+            f"Resultado {status.value}.",
+            int(status.value == "TEM_VAGA"),
+        )
+
+
 def settings() -> Settings:
     return Settings(
         origin="7185",
@@ -83,6 +105,24 @@ def test_notification_failure_does_not_stop_monitor() -> None:
 
     assert service.snapshot().running is True
     assert service.snapshot().status == "TEM_VAGA"
+
+    service.stop()
+    wait_for_status(service, "PARADO")
+
+
+def test_alerts_once_per_new_availability_transition() -> None:
+    alerts: list[AvailabilityResult] = []
+    service = MonitorService(
+        client_factory=TransitionClient,
+        notifier=lambda _settings, result, *_: alerts.append(result),
+    )
+
+    service.start(settings())
+    deadline = time.monotonic() + 1
+    while len(alerts) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    assert len(alerts) == 2
 
     service.stop()
     wait_for_status(service, "PARADO")
