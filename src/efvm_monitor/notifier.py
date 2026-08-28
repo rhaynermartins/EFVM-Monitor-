@@ -115,7 +115,7 @@ class SMSConfig:
     def from_env(cls) -> SMSConfig:
         load_dotenv()
         return cls(
-            enabled=_env_boolean("SMS_ENABLED", True),
+            enabled=_env_boolean("SMS_ENABLED", False),
             provider=os.getenv("SMS_PROVIDER", "twilio").strip().casefold(),
             account_sid=os.getenv("TWILIO_ACCOUNT_SID", "").strip(),
             auth_token=os.getenv("TWILIO_AUTH_TOKEN", "").strip(),
