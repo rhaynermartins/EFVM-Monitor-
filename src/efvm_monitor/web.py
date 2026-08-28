@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from efvm_monitor.checker import EFVMClient, PortalError
 from efvm_monitor.cli import _configure_logging
 from efvm_monitor.config import ConfigurationError, Settings
+from efvm_monitor.database import MonitoringRepository, PersistedMonitor
 from efvm_monitor.monitor import MonitorAlreadyRunning, MonitorService
 
 LOGGER = logging.getLogger(__name__)
@@ -91,23 +92,54 @@ def _settings_for_query(
     )
 
 
+def _settings_from_monitor(monitor: PersistedMonitor) -> Settings:
+    return monitor.to_settings(
+        timeout_seconds=int(os.getenv("EFVM_TIMEOUT_SECONDS", "30")),
+        log_level=os.getenv("EFVM_LOG_LEVEL", "INFO"),
+        base_url=os.getenv(
+            "EFVM_BASE_URL", "https://tremdepassageiros.vale.com/sgpweb/rest"
+        ),
+        railway_code=os.getenv("EFVM_RAILWAY_CODE", "03"),
+        alert_webhook_url=os.getenv("ALERT_WEBHOOK_URL"),
+    )
+
+
 def create_app(
     *,
     monitor: MonitorService | None = None,
+    repository: MonitoringRepository | None = None,
     catalog_provider: Callable[[], dict[str, Any]] | None = None,
 ) -> FastAPI:
-    monitor_service = monitor or MonitorService()
+    storage = repository
+    if monitor is None:
+        storage = storage or MonitoringRepository(
+            os.getenv("EFVM_DATABASE_PATH", "data/efvm-monitor.db")
+        )
+        monitor_service = MonitorService(repository=storage)
+    else:
+        monitor_service = monitor
     provide_catalog = catalog_provider or CatalogCache().get
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        if storage is not None:
+            storage.initialize()
+            saved_monitor = storage.latest_monitor()
+            if saved_monitor is not None:
+                saved_settings: Settings | None = None
+                if saved_monitor.active:
+                    try:
+                        saved_settings = _settings_from_monitor(saved_monitor)
+                    except ConfigurationError as exc:
+                        LOGGER.error("Monitor salvo não pôde ser retomado: %s", exc)
+                monitor_service.restore(saved_monitor, saved_settings)
         yield
         monitor_service.shutdown()
 
     application = FastAPI(
         title="EFVM Monitor",
         description="Interface local de consulta de disponibilidade, sem compra de passagem.",
-        version="0.2.0",
+        version="0.3.0",
         lifespan=lifespan,
     )
     application.mount(
@@ -159,6 +191,16 @@ def create_app(
     @application.get("/api/monitoramento")
     def monitoring_status() -> dict[str, Any]:
         return monitor_service.snapshot().to_dict()
+
+    @application.get("/api/monitoramento/historico")
+    def monitoring_history(
+        limit: int = Query(default=50, ge=1, le=1_000),
+    ) -> dict[str, Any]:
+        snapshot = monitor_service.snapshot()
+        return {
+            "monitoring_id": snapshot.monitoring_id,
+            "items": monitor_service.history(limit),
+        }
 
     @application.delete("/api/monitoramento")
     def stop_monitoring() -> dict[str, Any]:
