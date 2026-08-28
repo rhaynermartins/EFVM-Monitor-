@@ -15,10 +15,10 @@ from typing import Any, Literal
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from efvm_monitor.checker import EFVMClient, PortalError
 from efvm_monitor.cli import _configure_logging
@@ -26,6 +26,7 @@ from efvm_monitor.config import ConfigurationError, Settings
 from efvm_monitor.database import MonitoringRepository, PersistedMonitor
 from efvm_monitor.monitor import MonitorAlreadyRunning, MonitorService
 from efvm_monitor.notifier import NotificationService
+from efvm_monitor.web_push import WebPushConfigurationError, WebPushSendError
 
 LOGGER = logging.getLogger(__name__)
 PACKAGE_DIRECTORY = Path(__file__).parent
@@ -41,6 +42,34 @@ class MonitoringRequest(BaseModel):
     interval_seconds: int = Field(default=300, ge=60, le=86_400)
     whatsapp_enabled: bool = False
     sms_enabled: bool = False
+    push_device_id: str | None = Field(default=None, min_length=16, max_length=128)
+
+
+class PushKeysRequest(BaseModel):
+    p256dh: str = Field(min_length=16, max_length=512)
+    auth: str = Field(min_length=8, max_length=256)
+
+
+class PushSubscriptionRequest(BaseModel):
+    device_id: str = Field(min_length=16, max_length=128)
+    endpoint: str = Field(min_length=16, max_length=2_048)
+    keys: PushKeysRequest
+
+    @field_validator("endpoint")
+    @classmethod
+    def validate_endpoint(cls, value: str) -> str:
+        if not value.startswith("https://"):
+            raise ValueError("O endpoint Web Push deve usar HTTPS.")
+        return value
+
+
+class PushUnsubscribeRequest(BaseModel):
+    device_id: str = Field(min_length=16, max_length=128)
+    endpoint: str = Field(min_length=16, max_length=2_048)
+
+
+class PushDeviceRequest(BaseModel):
+    device_id: str = Field(min_length=16, max_length=128)
 
 
 class CatalogCache:
@@ -157,7 +186,7 @@ def create_app(
     application = FastAPI(
         title="EFVM Monitor",
         description="Interface local de consulta de disponibilidade, sem compra de passagem.",
-        version="0.4.1",
+        version="0.4.2",
         lifespan=lifespan,
     )
     application.mount(
@@ -181,6 +210,92 @@ def create_app(
                 "sms_recipient_masked": notifications.sms_recipient_masked,
             },
         )
+
+    @application.get("/manifest.webmanifest", include_in_schema=False)
+    def manifest() -> FileResponse:
+        return FileResponse(
+            PACKAGE_DIRECTORY / "static" / "manifest.webmanifest",
+            media_type="application/manifest+json",
+        )
+
+    @application.get("/service-worker.js", include_in_schema=False)
+    def service_worker() -> FileResponse:
+        return FileResponse(
+            PACKAGE_DIRECTORY / "static" / "service-worker.js",
+            media_type="application/javascript",
+            headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+        )
+
+    @application.get("/api/push/config")
+    def push_config() -> dict[str, Any]:
+        return {
+            "enabled": notifications.web_push_config.enabled,
+            "configured": notifications.web_push_configured,
+            "public_key": notifications.web_push_public_key,
+        }
+
+    @application.get("/api/push/status")
+    def push_status(device_id: str = Query(min_length=16, max_length=128)) -> dict[str, Any]:
+        subscription = (
+            storage.get_push_subscription_for_device(device_id)
+            if storage is not None
+            else None
+        )
+        return {
+            "enabled": notifications.web_push_config.enabled,
+            "configured": notifications.web_push_configured,
+            "subscribed": subscription is not None,
+            "last_success_at": subscription.last_success_at if subscription else None,
+            "last_failure_at": subscription.last_failure_at if subscription else None,
+        }
+
+    @application.post("/api/push/subscribe", status_code=status.HTTP_201_CREATED)
+    def subscribe_push(payload: PushSubscriptionRequest, request: Request) -> dict[str, Any]:
+        if storage is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Persistência Web Push indisponível.",
+            )
+        if not notifications.web_push_configured:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Web Push ainda não foi configurado no servidor.",
+            )
+        subscription = storage.upsert_push_subscription(
+            device_id=payload.device_id,
+            endpoint=payload.endpoint,
+            p256dh=payload.keys.p256dh,
+            auth=payload.keys.auth,
+            user_agent=request.headers.get("user-agent"),
+        )
+        monitoring_id = monitor_service.snapshot().monitoring_id
+        if monitoring_id is not None:
+            storage.link_push_subscription(monitoring_id, subscription.id)
+        return {"subscribed": True, "linked_monitoring_id": monitoring_id}
+
+    @application.post("/api/push/unsubscribe")
+    def unsubscribe_push(payload: PushUnsubscribeRequest) -> dict[str, Any]:
+        if storage is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Persistência Web Push indisponível.",
+            )
+        deactivated = storage.unsubscribe_push(
+            device_id=payload.device_id,
+            endpoint=payload.endpoint,
+        )
+        return {"subscribed": False, "deactivated": deactivated}
+
+    @application.post("/api/push/test")
+    def test_push(payload: PushDeviceRequest) -> dict[str, Any]:
+        try:
+            attempts = notifications.send_test_web_push(payload.device_id)
+        except (WebPushConfigurationError, WebPushSendError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=str(exc),
+            ) from exc
+        return {"sent": True, "attempts": attempts}
 
     @application.get("/api/catalogo")
     def catalog() -> dict[str, Any]:
@@ -208,7 +323,12 @@ def create_app(
                 destination_label=labels[1],
                 sms_enabled=payload.sms_enabled,
             )
-            return monitor_service.start(settings).to_dict()
+            snapshot = monitor_service.start(settings)
+            if storage is not None and payload.push_device_id and snapshot.monitoring_id:
+                subscription = storage.get_push_subscription_for_device(payload.push_device_id)
+                if subscription is not None:
+                    storage.link_push_subscription(snapshot.monitoring_id, subscription.id)
+            return snapshot.to_dict()
         except ConfigurationError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         except MonitorAlreadyRunning as exc:
