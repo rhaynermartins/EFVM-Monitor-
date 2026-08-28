@@ -2,9 +2,9 @@
 
 Prova de conceito em Python para consultar a disponibilidade de passagens do Trem de
 Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O projeto
-**não compra passagem** e não acessa etapas de login, CPF, reserva, assento ou pagamento.
+**não compra passagem** e não acessa login da Vale, CPF, reserva, assento ou pagamento.
 
-## Escopo atual — Fases 1, 2, 3, 4, 4.1, 4.2 e 5
+## Escopo atual — Fases 1 a 6
 
 - configurar origem, destino, data, classe e quantidade de passageiros em `.env`;
 - consultar somente interfaces públicas usadas antes do fluxo de compra;
@@ -25,10 +25,14 @@ Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O pr
 - manter o monitor funcionando mesmo quando um canal estiver indisponível.
 - executar monitores simultâneos com ID, estado, intervalo e histórico independentes;
 - pausar, retomar e remover logicamente cada monitor sem interromper os demais.
+- criar conta, entrar, sair e manter uma sessão persistente com cookie seguro;
+- separar monitoramentos, histórico e dispositivos Web Push por usuário;
+- bloquear acesso horizontal a IDs pertencentes a outras contas;
+- proteger operações de escrita contra CSRF.
 
-Não fazem parte deste MVP: login, dados pessoais, escolha ou bloqueio de assento, reserva,
-pagamento, compra, solução de CAPTCHA e qualquer tentativa de contornar bloqueios ou
-mecanismos anti-bot.
+Não fazem parte deste MVP: login na conta da Vale, escolha ou bloqueio de assento, reserva,
+pagamento, compra, solução de CAPTCHA e qualquer tentativa de contornar bloqueios ou mecanismos
+anti-bot. A autenticação existente protege somente a conta local do EFVM Monitor.
 
 ## Investigação legítima do portal
 
@@ -90,6 +94,7 @@ efvm-monitor-web
 
 Abra [http://127.0.0.1:8000](http://127.0.0.1:8000) no navegador. A tela permite:
 
+- criar uma conta local e entrar no próprio espaço;
 - selecionar origem e destino na lista atual do portal;
 - escolher uma data dentro da janela vigente de venda;
 - selecionar classe Econômica ou Executiva;
@@ -103,6 +108,32 @@ Abra [http://127.0.0.1:8000](http://127.0.0.1:8000) no navegador. A tela permite
 - testar ou desativar o Web Push pela própria tela;
 - ativar SMS e WhatsApp como alternativas opcionais, quando configurados;
 - consultar as verificações recentes persistidas no painel.
+
+### Usuários, sessões e isolamento
+
+Cada conta possui ownership próprio no backend. Listar, consultar, pausar, retomar, remover e
+abrir histórico sempre usa o usuário obtido da sessão; informar manualmente o ID de outro
+usuário retorna recurso não encontrado. O mesmo filtro é aplicado a subscriptions e testes Web
+Push. Uma conta pode cadastrar vários navegadores/dispositivos, e nenhum deles recebe alertas de
+monitoramentos pertencentes a outra conta.
+
+As senhas usam `scrypt` com salt aleatório. O navegador recebe somente um token opaco em cookie
+`HttpOnly` e `SameSite=Lax`; o hash desse token é persistido no SQLite. Operações que alteram
+estado também exigem um token CSRF ligado à sessão. Senhas, cookies e tokens de sessão não são
+armazenados em `localStorage`.
+
+Em desenvolvimento local, mantenha:
+
+```dotenv
+EFVM_COOKIE_SECURE=false
+```
+
+Quando a aplicação estiver publicada sob HTTPS, use `EFVM_COOKIE_SECURE=true`. Essa alteração é
+obrigatória no ambiente de produção da Fase 7.
+
+SMS e WhatsApp continuam disponíveis pelo CLI e integrações existentes, mas não são oferecidos
+na interface multiusuário porque hoje usam um destinatário global. O Web Push isolado por conta
+é o canal principal da aplicação web.
 
 O fluxo visual segue a ordem de uso: primeiro aparece **PASSO 1 — Configure a viagem** e,
 logo abaixo no mobile ou ao lado no desktop, **PASSO 2 — Acompanhe o estado**. O card de
@@ -123,8 +154,8 @@ que estava ativo recebe novamente seu executor independente; os pausados permane
 ## Persistência local
 
 O SQLite é inicializado automaticamente por migrations versionadas e aplicadas uma única vez.
-Não há `DROP`, `DELETE` automático ou limpeza de dados. A migration da Fase 5 usa apenas
-`ALTER TABLE ... ADD COLUMN` e um índice para acrescentar a remoção lógica.
+Não há `DROP`, `DELETE` automático ou limpeza de dados. As migrations das Fases 5 e 6 usam
+criação de tabelas, novas colunas, índices e atribuição de ownership sem apagar registros.
 
 Tabelas atuais:
 
@@ -134,11 +165,23 @@ Tabelas atuais:
 - `notification_deliveries`: tentativas, resultado, canal e situação dos envios;
 - `push_subscriptions`: endpoint e chaves públicas de cada navegador/dispositivo;
 - `monitoring_push_subscriptions`: vínculo entre dispositivo e monitoramento, sem broadcast;
+- `users`: contas locais, hash de senha e estado numérico;
+- `auth_sessions`: hashes dos tokens de sessão, CSRF, expiração e revogação;
 - `schema_migrations`: versões de schema já aplicadas.
 
 `monitoring_jobs.removed_at` implementa remoção lógica. Remover pela interface não executa
 `DELETE`: configuração, verificações e entregas continuam preservadas no SQLite, mas o monitor
 deixa de aparecer e não pode ser retomado pela aplicação.
+
+Registros anteriores à Fase 6 são atribuídos a um proprietário legado desabilitado. Para
+transferi-los com segurança, configure antes do cadastro da conta responsável:
+
+```dotenv
+EFVM_LEGACY_OWNER_EMAIL=responsavel@example.com
+```
+
+A transferência ocorre somente quando o e-mail cadastrado coincide exatamente. Em instalações
+novas, deixe a variável vazia. Nenhum usuário pode assumir dados legados automaticamente.
 
 O status do monitor é numérico no banco:
 
