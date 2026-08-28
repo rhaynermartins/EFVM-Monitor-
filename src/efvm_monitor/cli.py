@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import logging
 import os
 import sys
@@ -11,7 +12,9 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from dotenv import load_dotenv
+from py_vapid import Vapid
 
 from efvm_monitor.checker import AvailabilityResult, AvailabilityStatus, EFVMClient
 from efvm_monitor.config import ConfigurationError, Settings
@@ -46,7 +49,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=("monitor", "test-whatsapp", "test-sms"),
+        choices=("monitor", "test-whatsapp", "test-sms", "generate-vapid-keys"),
         default="monitor",
         help="use test-whatsapp para validar a Cloud API sem consultar passagens",
     )
@@ -117,9 +120,26 @@ def watch(settings: Settings, notifier: NotificationService | None = None) -> in
             time.sleep(settings.check_interval_seconds)
 
 
+def _base64url(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     load_dotenv(dotenv_path=args.env_file)
+    if args.command == "generate-vapid-keys":
+        vapid = Vapid()
+        vapid.generate_keys()
+        private_number = vapid.private_key.private_numbers().private_value
+        private_raw = private_number.to_bytes(32, byteorder="big")
+        public_raw = vapid.public_key.public_bytes(
+            Encoding.X962,
+            PublicFormat.UncompressedPoint,
+        )
+        print(f"VAPID_PUBLIC_KEY={_base64url(public_raw)}")
+        print(f"VAPID_PRIVATE_KEY={_base64url(private_raw)}")
+        print("Guarde a chave privada somente no .env e nunca a envie ao navegador.")
+        return 0
     if args.command == "test-sms":
         _configure_logging(os.getenv("EFVM_LOG_LEVEL", "INFO").strip().upper())
         try:
