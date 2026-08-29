@@ -164,6 +164,26 @@ def test_phase_eight_assets_include_accessible_mobile_states(
     assert '@media (max-width: 600px)' in stylesheet.text
 
 
+def test_phase_eight_assets_support_date_containment_and_history_navigation(
+    web_client: tuple[TestClient, StubMonitor],
+) -> None:
+    client, _ = web_client
+
+    page = client.get("/")
+    javascript = client.get("/static/app.js")
+    stylesheet = client.get("/static/style.css")
+
+    assert page.text.count('id="monitor-history"') == 1
+    assert 'historySection: document.querySelector("#monitor-history")' in javascript.text
+    assert "const historyDisplayed = await loadHistory(state.monitoring_id)" in javascript.text
+    assert 'scrollIntoView({ behavior: "smooth", block: "start" })' in javascript.text
+    assert '.field input[type="date"]' in stylesheet.text
+    assert "inline-size: 100%" in stylesheet.text
+    assert "min-inline-size: 0" in stylesheet.text
+    assert "max-inline-size: 100%" in stylesheet.text
+    assert "-webkit-min-logical-width: 0" in stylesheet.text
+
+
 def test_catalog_returns_stations_and_classes(web_client: tuple[TestClient, StubMonitor]) -> None:
     client, _ = web_client
 
