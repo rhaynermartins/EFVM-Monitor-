@@ -105,11 +105,11 @@ Abra [http://127.0.0.1:8000](http://127.0.0.1:8000) no navegador. A tela permite
 - escolher intervalos a partir de 60 segundos;
 - adicionar vários monitoramentos sem parar os que já estão ativos;
 - listar, pausar, retomar, remover e abrir o histórico individual de cada ID;
-- acompanhar `AGUARDANDO`, `TEM_VAGA`, `SEM_VAGA`, `ERRO` e `PARADO`;
+- acompanhar estados amigáveis como iniciando, sem vagas, passagem encontrada, atenção e pausado;
 - instalar a PWA em navegadores compatíveis;
 - ativar Web Push explicitamente neste dispositivo, sem pedido automático de permissão;
 - testar ou desativar o Web Push pela própria tela;
-- ativar SMS e WhatsApp como alternativas opcionais, quando configurados;
+- consultar se o dispositivo atual está protegido por Web Push;
 - consultar as verificações recentes persistidas no painel.
 
 ### Usuários, sessões e isolamento
@@ -141,6 +141,30 @@ na interface multiusuário porque hoje usam um destinatário global. O Web Push 
 O fluxo visual segue a ordem de uso: primeiro aparece **PASSO 1 — Configure a viagem** e,
 logo abaixo no mobile ou ao lado no desktop, **PASSO 2 — Acompanhe o estado**. O card de
 acompanhamento nunca é movido para antes da configuração.
+
+### Experiência mobile — Fase 8
+
+O primeiro acesso apresenta uma sequência curta: conta criada, viagem configurada, aplicativo
+instalado e notificações ativadas. O progresso é calculado a partir do estado real da conta e do
+dispositivo; nenhuma senha, sessão ou preferência sensível é salva no armazenamento do
+navegador.
+
+A interface diferencia carregamento, lista vazia, falha temporária, ausência de conexão,
+monitor ativo ou pausado, passagem encontrada e notificações bloqueadas. As mensagens exibidas
+ao usuário evitam detalhes internos. A próxima consulta é apresentada como uma previsão baseada
+na última verificação e no intervalo configurado.
+
+As instruções de instalação são específicas para a plataforma:
+
+- iPhone/iPad: Safari → Compartilhar → Adicionar à Tela de Início → abrir pelo ícone → ativar
+  alertas;
+- Android: usar **Instalar aplicativo** quando oferecido → abrir pelo ícone → permitir alertas;
+- computador: a instalação é opcional e aparece somente quando o navegador oferece suporte.
+
+Web Push permanece como canal principal e gratuito. SMS continua opcional pelo CLI quando
+configurado. WhatsApp não é oferecido na interface multiusuário e permanece desativado como
+possibilidade futura. Os cards mantêm foco visível, rótulos acessíveis, controles com área de
+toque adequada e leitura responsiva.
 
 O servidor escuta apenas em `127.0.0.1` e não fica exposto à rede local. Para usar outra
 porta, altere `EFVM_WEB_PORT` no `.env`.
@@ -407,7 +431,8 @@ Os testes locais verificam a classificação dos três estados, migrations idemp
 persistência, histórico, retomada após reinicialização, deduplicação de alertas, retry,
 continuidade após falha de notificação, subscriptions Web Push, invalidação `404`/`410`,
 proteção da chave VAPID privada, service worker, serviço em segundo plano, rotas e validações
-do formulário. Eles não fazem chamadas ao portal nem enviam mensagens reais.
+do formulário, onboarding e estados mobile da Fase 8. Eles não fazem chamadas ao portal nem
+enviam mensagens reais.
 
 ## Rotas locais
 
