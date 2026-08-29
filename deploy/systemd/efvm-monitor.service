@@ -1,0 +1,23 @@
+[Unit]
+Description=EFVM Monitor web application and monitoring manager
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=efvm
+Group=efvm
+WorkingDirectory=/opt/efvm-monitor/app
+EnvironmentFile=/etc/efvm-monitor/efvm-monitor.env
+ExecStart=/opt/efvm-monitor/venv/bin/uvicorn efvm_monitor.web:app --host 127.0.0.1 --port 8000 --workers 1 --log-level info
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGINT
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
