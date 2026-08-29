@@ -208,6 +208,20 @@ def persistent_app(database_path: Path) -> tuple[Any, MonitoringRepository]:
     return application, storage
 
 
+def test_healthcheck_is_public_and_confirms_database(tmp_path: Path) -> None:
+    storage = MonitoringRepository(tmp_path / "health.db")
+    application = create_app(
+        repository=storage,
+        catalog_provider=lambda: CATALOG,
+    )
+
+    with TestClient(application) as client:
+        response = client.get("/healthz")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "database": "ok"}
+
+
 def test_recovers_active_monitor_and_history_after_restart(tmp_path: Path) -> None:
     database_path = tmp_path / "persisted.db"
     first_app, first_storage = persistent_app(database_path)
