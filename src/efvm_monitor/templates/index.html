@@ -21,33 +21,32 @@
     <header class="site-header">
       <div class="header-content">
         <a class="brand" href="/" aria-label="Página inicial do EFVM Monitor">
-          <span class="brand-mark" aria-hidden="true">EF</span>
-          <span>
-            <strong>EFVM Monitor</strong>
-            <small>Disponibilidade de passagens</small>
-          </span>
+          <img
+            class="brand-icon"
+            src="/static/icons/icon-192.png"
+            width="42"
+            height="42"
+            alt=""
+          >
+          <strong>EFVM</strong>
         </a>
-        <div class="header-actions">
-          <a
-            class="official-link"
-            href="{{ official_portal_url }}"
-            target="_blank"
-            rel="noreferrer"
-          >Abrir portal oficial</a>
-          {% if authentication_enabled %}
+        {% if authentication_enabled %}
+          <div class="header-actions">
             <div class="account-summary">
-              <span>
-                <strong>{{ authenticated_user.name }}</strong>
-                <small>{{ authenticated_user.email }}</small>
-              </span>
+              <strong class="account-name" title="{{ authenticated_user.name }}">
+                {{ authenticated_user.name }}
+              </strong>
               <button id="logout-button" class="text-button" type="button">Sair</button>
             </div>
-          {% endif %}
-        </div>
+          </div>
+        {% endif %}
       </div>
     </header>
 
     <main class="page-shell">
+      {% if authentication_enabled %}
+        <p class="user-greeting">Olá, <strong>{{ authenticated_user.name }}</strong>.</p>
+      {% endif %}
       <section class="intro" aria-labelledby="page-title">
         <p class="eyebrow">Seu monitor de passagens</p>
         <h1 id="page-title">Encontre a passagem. A compra continua sendo sua.</h1>
@@ -85,24 +84,44 @@
           </li>
           <li id="onboarding-install" class="onboarding-step">
             <span class="onboarding-step-marker" aria-hidden="true">3</span>
-            <span>
-              <strong>Instale o EFVM Monitor</strong>
+            <div class="onboarding-step-content">
+              <strong id="install-title">Instale o EFVM</strong>
               <small id="install-status">Verificando este dispositivo…</small>
-              <span id="ios-install-help" class="platform-install-help" hidden>
-                No iPhone: abra no Safari, toque em Compartilhar, escolha “Adicionar à Tela de
-                Início” e depois abra pelo novo ícone.
-              </span>
-              <span id="android-install-help" class="platform-install-help" hidden>
-                No Android: toque em “Instalar aplicativo”, abra pelo novo ícone e permita as
-                notificações quando solicitado.
-              </span>
-              <span id="desktop-install-help" class="platform-install-help" hidden>
+              <div id="ios-install-help" class="platform-install-help" hidden>
+                <strong>Instale o EFVM no seu iPhone</strong>
+                <ol>
+                  <li>Abra esta página pelo Safari.</li>
+                  <li>Toque no botão Compartilhar.</li>
+                  <li>Escolha “Adicionar à Tela de Início”.</li>
+                  <li>Confirme em “Adicionar”.</li>
+                  <li>Abra o EFVM pelo novo ícone na Tela de Início.</li>
+                  <li>Dentro do aplicativo, toque em “Ativar alertas”.</li>
+                  <li>Quando o iPhone perguntar, escolha “Permitir”.</li>
+                </ol>
+                <p>
+                  Para receber alertas no iPhone mesmo com o aplicativo fechado, adicione o EFVM
+                  à Tela de Início e ative as notificações.
+                </p>
+              </div>
+              <div id="android-install-help" class="platform-install-help" hidden>
+                <strong>Instale o EFVM no seu celular</strong>
+                <ol>
+                  <li>Abra esta página no Chrome.</li>
+                  <li>Abra o menu do navegador.</li>
+                  <li>Toque em “Instalar app” ou “Adicionar à tela inicial”.</li>
+                  <li>Confirme a instalação.</li>
+                  <li>Abra o EFVM pelo novo ícone.</li>
+                  <li>Dentro do aplicativo, toque em “Ativar alertas”.</li>
+                  <li>Permita as notificações.</li>
+                </ol>
+              </div>
+              <div id="desktop-install-help" class="platform-install-help" hidden>
                 Neste computador, use “Instalar aplicativo” quando o navegador oferecer a opção.
-              </span>
+              </div>
               <button id="install-app" class="text-button" type="button" hidden>
                 Instalar aplicativo
               </button>
-            </span>
+            </div>
           </li>
           <li id="onboarding-push" class="onboarding-step">
             <span class="onboarding-step-marker" aria-hidden="true">4</span>
