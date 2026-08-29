@@ -1,71 +1,118 @@
 # EFVM Monitor
 
-Prova de conceito em Python para consultar a disponibilidade de passagens do Trem de
-Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O projeto
-**não compra passagem** e não acessa login da Vale, CPF, reserva, assento ou pagamento.
+[![CI](https://github.com/rhaynermartins/EFVM-Monitor-/actions/workflows/ci.yml/badge.svg)](https://github.com/rhaynermartins/EFVM-Monitor-/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-176b4d)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-176b4d.svg)](LICENSE)
 
-## Escopo atual — Fases 1 a 7
+Monitor independente de disponibilidade de passagens do Trem de Passageiros da Estrada de
+Ferro Vitória a Minas (EFVM). A aplicação procura a viagem configurada e avisa quando encontra
+vaga; a compra continua sendo feita manualmente no portal oficial.
 
-- configurar origem, destino, data, classe e quantidade de passageiros em `.env`;
-- consultar somente interfaces públicas usadas antes do fluxo de compra;
-- informar claramente `TEM_VAGA`, `SEM_VAGA` ou `ERRO`;
-- registrar logs no terminal e em `logs/efvm-monitor.log`;
-- emitir alerta no terminal e, opcionalmente, por webhook;
-- executar uma vez ou repetir a consulta em intervalo controlado.
-- escolher origem, destino, data e classe em uma interface local;
-- iniciar, acompanhar e operar vários monitoramentos pelo navegador;
-- instalar a interface como PWA e receber Web Push padrão mesmo com a página fechada;
-- persistir a configuração e o estado em SQLite local;
-- registrar o histórico de `TEM_VAGA`, `SEM_VAGA` e `ERRO`;
-- recuperar o último monitor salvo e retomar automaticamente o que estava ativo.
-- usar Web Push com VAPID como canal principal gratuito;
-- manter SMS/Twilio e WhatsApp Cloud API como canais opcionais, desativados por padrão;
-- evitar mensagens repetidas enquanto a disponibilidade continuar `TEM_VAGA`;
-- registrar tentativas, sucessos e falhas dos alertas no SQLite;
-- manter o monitor funcionando mesmo quando um canal estiver indisponível.
-- executar monitores simultâneos com ID, estado, intervalo e histórico independentes;
-- pausar, retomar e remover logicamente cada monitor sem interromper os demais.
-- criar conta, entrar, sair e manter uma sessão persistente com cookie seguro;
-- separar monitoramentos, histórico e dispositivos Web Push por usuário;
-- bloquear acesso horizontal a IDs pertencentes a outras contas;
-- proteger operações de escrita contra CSRF.
-- executar continuamente em uma VM Oracle Cloud Always Free com SQLite persistente;
-- publicar a aplicação atrás do Caddy em uma URL HTTPS, sem expor a porta do Uvicorn;
-- iniciar aplicação, proxy HTTPS e backup automaticamente após reinicialização da VM.
+**O EFVM Monitor não é afiliado à Vale. Não compra, reserva ou bloqueia passagens, não escolhe
+assento, não preenche CPF, não acessa contas da Vale e não realiza pagamentos.**
 
-Não fazem parte deste MVP: login na conta da Vale, escolha ou bloqueio de assento, reserva,
-pagamento, compra, solução de CAPTCHA e qualquer tentativa de contornar bloqueios ou mecanismos
-anti-bot. A autenticação existente protege somente a conta local do EFVM Monitor.
+[Abrir instância pública](https://efvm-monitor-rhayner.duckdns.org) ·
+[Política de Privacidade](PRIVACY.md) · [Termos de Uso](TERMS.md) ·
+[Segurança](SECURITY.md)
 
-## Investigação legítima do portal
+## Problema e solução
 
-Em 27 de agosto de 2026, o fluxo público indicado pela [página oficial da Vale](https://www.vale.com/pt/trem-de-passageiros)
-direcionava para o [Portal do Trem de Passageiros](https://tremdepassageiros.vale.com/sgpweb/portal/index.html#/home).
-Ao carregar o formulário, o JavaScript público do próprio portal fazia consultas HTTP de
-leitura para:
+Em datas concorridas, consultar repetidamente o portal consome tempo e ainda não garante que a
+vaga estará disponível no momento da compra. O EFVM Monitor automatiza somente a consulta
+prévia e responsável:
 
-- obter ferrovias e a janela vigente de venda;
-- obter estações, classes e tipos de tarifa;
-- pesquisar passagens antes de qualquer início de venda.
+1. o usuário escolhe origem, destino, data, classe e intervalo;
+2. um worker independente consulta a disponibilidade;
+3. o resultado `TEM_VAGA`, `SEM_VAGA` ou `ERRO` é salvo no SQLite;
+4. na transição para `TEM_VAGA`, o Web Push alerta os dispositivos vinculados àquela conta;
+5. o usuário abre o canal oficial e conclui a compra por conta própria.
 
-Por isso, esta fase usa HTTP em vez de automação visual. A prova manual retornou tanto uma
-resposta explícita sem passagens quanto uma resposta com opção disponível. O monitor não
-usa nem persiste o `tokenCompra` presente em respostas com vaga.
+Enquanto o estado continuar `TEM_VAGA`, o alerta não é repetido. Depois de
+`TEM_VAGA → SEM_VAGA → TEM_VAGA`, uma nova notificação pode ser enviada.
 
-Essas interfaces não são uma API pública documentada e podem mudar sem aviso. Use um
-intervalo responsável, confira os termos vigentes do portal e interrompa o monitor caso o
-site apresente CAPTCHA, restrição de acesso ou solicite autenticação. O intervalo mínimo
-aceito pelo programa é 60 segundos; o exemplo usa 300 segundos.
+## Visão do produto
 
-## Requisitos
+![Onboarding e estado das notificações do EFVM Monitor](docs/screenshots/dashboard.jpg)
 
-- Python 3.11 ou superior;
-- acesso à internet;
-- Git, se quiser contribuir.
+![Configuração de origem, destino, data e classe](docs/screenshots/monitoring.jpg)
+
+As capturas foram produzidas localmente com uma conta sanitizada e não contêm dados da instância
+de produção.
+
+## Recursos
+
+- interface responsiva e mobile-first;
+- PWA instalável em iPhone, Android e navegadores compatíveis;
+- Web Push/VAPID como canal principal, gratuito e isolado por usuário;
+- cadastro, login, logout, sessão persistente e proteção CSRF;
+- ownership de monitores, histórico e dispositivos validado no backend;
+- múltiplos monitoramentos simultâneos com pausa, retomada e remoção lógica;
+- retomada automática dos monitores ativos após reinicialização;
+- SQLite com migrations incrementais e histórico de verificações;
+- healthcheck de servidor, banco, manager e workers;
+- logs estruturados, limites defensivos e recuperação de workers;
+- SMS/Twilio e WhatsApp Cloud API opcionais para instalações privadas, desativados por padrão;
+- CLI para consulta única ou contínua;
+- CI com testes, Ruff e validação JavaScript.
+
+## Arquitetura
+
+```text
+Navegador / PWA
+  ├── sessão segura + CSRF
+  ├── dashboard e histórico
+  └── Service Worker / Web Push
+            │ HTTPS
+            ▼
+          Caddy
+            │ 127.0.0.1:8000
+            ▼
+FastAPI + um MonitoringManager
+  ├── autenticação e isolamento por usuário
+  ├── rate limiting em memória
+  ├── workers independentes por monitor
+  ├── cliente HTTP do portal da Vale
+  ├── NotificationService / Web Push
+  └── camada de persistência
+            │
+            ▼
+      SQLite persistente
+      + backup diário
+```
+
+A implantação atual usa exatamente um processo Uvicorn e um `MonitoringManager`. Essa decisão
+evita workers duplicados e escrita concorrente entre processos no SQLite, além de permanecer
+compatível com a VM Oracle Cloud Always Free de 1 GB.
+
+## Stack
+
+- Python 3.11+, FastAPI e Uvicorn;
+- HTTPX para consultas e integrações HTTP;
+- Jinja2, HTML, CSS e JavaScript sem framework frontend;
+- SQLite e migrations SQL versionadas;
+- PyWebPush/VAPID, Service Worker e Push API;
+- Caddy para HTTPS e proxy reverso;
+- systemd para aplicação e backups;
+- Pytest, Ruff e GitHub Actions.
+
+## Consulta legítima ao portal
+
+A [página oficial da Vale](https://www.vale.com/pt/trem-de-passageiros) direciona ao Portal do
+Trem de Passageiros. O formulário público consulta interfaces HTTP de leitura antes de qualquer
+início de compra; por isso o projeto usa HTTP, e não automação visual. O monitor não usa nem
+persiste token de compra retornado pelo portal.
+
+Essas interfaces não são uma API pública documentada e podem mudar sem aviso. O intervalo mínimo
+aceito é de 60 segundos. Se o portal apresentar CAPTCHA, autenticação, bloqueio ou outra proteção,
+o EFVM Monitor registra e trata a situação sem tentar contorná-la.
 
 ## Instalação local
 
+Requisitos: Python 3.11 ou superior, acesso à internet e Git.
+
 ```bash
+git clone https://github.com/rhaynermartins/EFVM-Monitor-.git
+cd EFVM-Monitor-
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -73,469 +120,196 @@ python -m pip install -e '.[dev]'
 cp .env.example .env
 ```
 
-Para usar o CLI, edite o `.env` e ajuste principalmente:
+Em desenvolvimento local, mantenha no `.env`:
 
 ```dotenv
-EFVM_ORIGIN=Belo Horizonte
-EFVM_DESTINATION=Pedro Nolasco (Cariacica / Vitória)
-EFVM_TRAVEL_DATE=2026-09-15
-EFVM_CLASS=Econômica
-EFVM_PASSENGERS=1
+EFVM_COOKIE_SECURE=false
+EFVM_DATABASE_PATH=data/efvm-monitor.db
 ```
 
-Os nomes precisam corresponder aos nomes reais retornados pelo portal. Também é possível
-usar o ID numérico da estação ou classe. O programa não aceita correspondência parcial para
-não escolher uma estação errada por aproximação.
-
-## Interface local
-
-Inicie o servidor:
+Inicie a aplicação:
 
 ```bash
 efvm-monitor-web
 ```
 
-Abra [http://127.0.0.1:8000](http://127.0.0.1:8000) no navegador. A tela permite:
+Abra [http://127.0.0.1:8000](http://127.0.0.1:8000), crie uma conta e configure a
+viagem. O servidor de desenvolvimento escuta somente em `127.0.0.1`.
 
-- criar uma conta local e entrar no próprio espaço;
-- selecionar origem e destino na lista atual do portal;
-- escolher uma data dentro da janela vigente de venda;
-- selecionar classe Econômica ou Executiva;
-- monitorar exatamente 1 passageiro;
-- escolher intervalos a partir de 60 segundos;
-- adicionar vários monitoramentos sem parar os que já estão ativos;
-- listar, pausar, retomar, remover e abrir o histórico individual de cada ID;
-- acompanhar estados amigáveis como iniciando, sem vagas, passagem encontrada, atenção e pausado;
-- instalar a PWA em navegadores compatíveis;
-- ativar Web Push explicitamente neste dispositivo, sem pedido automático de permissão;
-- testar ou desativar o Web Push pela própria tela;
-- consultar se o dispositivo atual está protegido por Web Push;
-- consultar as verificações recentes persistidas no painel.
+## PWA e Web Push
 
-### Usuários, sessões e isolamento
-
-Cada conta possui ownership próprio no backend. Listar, consultar, pausar, retomar, remover e
-abrir histórico sempre usa o usuário obtido da sessão; informar manualmente o ID de outro
-usuário retorna recurso não encontrado. O mesmo filtro é aplicado a subscriptions e testes Web
-Push. Uma conta pode cadastrar vários navegadores/dispositivos, e nenhum deles recebe alertas de
-monitoramentos pertencentes a outra conta.
-
-As senhas usam `scrypt` com salt aleatório. O navegador recebe somente um token opaco em cookie
-`HttpOnly` e `SameSite=Lax`; o hash desse token é persistido no SQLite. Operações que alteram
-estado também exigem um token CSRF ligado à sessão. Senhas, cookies e tokens de sessão não são
-armazenados em `localStorage`.
-
-Em desenvolvimento local, mantenha:
-
-```dotenv
-EFVM_COOKIE_SECURE=false
-```
-
-Quando a aplicação estiver publicada sob HTTPS, use `EFVM_COOKIE_SECURE=true`. Essa alteração é
-obrigatória no ambiente de produção da Fase 7.
-
-SMS e WhatsApp continuam disponíveis pelo CLI e integrações existentes, mas não são oferecidos
-na interface multiusuário porque hoje usam um destinatário global. O Web Push isolado por conta
-é o canal principal da aplicação web.
-
-O fluxo visual segue a ordem de uso: primeiro aparece **PASSO 1 — Configure a viagem** e,
-logo abaixo no mobile ou ao lado no desktop, **PASSO 2 — Acompanhe o estado**. O card de
-acompanhamento nunca é movido para antes da configuração.
-
-### Experiência mobile — Fase 8
-
-O primeiro acesso apresenta uma sequência curta: conta criada, viagem configurada, aplicativo
-instalado e notificações ativadas. O progresso é calculado a partir do estado real da conta e do
-dispositivo; nenhuma senha, sessão ou preferência sensível é salva no armazenamento do
-navegador.
-
-A interface diferencia carregamento, lista vazia, falha temporária, ausência de conexão,
-monitor ativo ou pausado, passagem encontrada e notificações bloqueadas. As mensagens exibidas
-ao usuário evitam detalhes internos. A próxima consulta é apresentada como uma previsão baseada
-na última verificação e no intervalo configurado.
-
-As instruções de instalação são específicas para a plataforma:
-
-- iPhone/iPad: Safari → Compartilhar → Adicionar à Tela de Início → abrir pelo ícone → ativar
-  alertas;
-- Android: usar **Instalar aplicativo** quando oferecido → abrir pelo ícone → permitir alertas;
-- computador: a instalação é opcional e aparece somente quando o navegador oferece suporte.
-
-Web Push permanece como canal principal e gratuito. SMS continua opcional pelo CLI quando
-configurado. WhatsApp não é oferecido na interface multiusuário e permanece desativado como
-possibilidade futura. Os cards mantêm foco visível, rótulos acessíveis, controles com área de
-toque adequada e leitura responsiva.
-
-O servidor escuta apenas em `127.0.0.1` e não fica exposto à rede local. Para usar outra
-porta, altere `EFVM_WEB_PORT` no `.env`.
-
-Em desktop, `localhost`/`127.0.0.1` é aceito pelos navegadores como contexto seguro de
-desenvolvimento. Para instalar e testar em um telefone físico, o aparelho precisa acessar o
-servidor por uma URL HTTPS válida. Não exponha o servidor de desenvolvimento diretamente na
-internet.
-
-## Produção — Fase 7
-
-A implantação atual está disponível em
-[https://efvm-monitor-rhayner.duckdns.org](https://efvm-monitor-rhayner.duckdns.org). O Caddy
-encerra TLS e encaminha as requisições para uma única instância Uvicorn em
-`127.0.0.1:8000`. O cookie de sessão usa `Secure`, `HttpOnly` e `SameSite=Lax`.
-
-O endpoint abaixo permite verificar a aplicação e a abertura do SQLite sem autenticação:
-
-```bash
-curl --fail https://efvm-monitor-rhayner.duckdns.org/healthz
-```
-
-Use `GET /healthz?details=true` para comparar monitores ativos com workers vivos. Uma
-divergência ou indisponibilidade do SQLite retorna HTTP `503`; a resposta detalhada contém
-somente contagens operacionais, sem dados de usuários ou viagens.
-
-Banco e backups ficam fora do checkout Git. O serviço da aplicação, o Caddy e o timer diário de
-backup iniciam automaticamente com a VM. A configuração operacional completa está em
-[docs/oracle-cloud-deployment.md](docs/oracle-cloud-deployment.md).
-
-O IPv4 da instância é efêmero. Depois de uma parada seguida de inicialização, confirme o novo
-endereço no Console Oracle e atualize o DuckDNS antes de considerar o serviço recuperado. Tokens
-DuckDNS, chaves VAPID, `.env`, SQLite e logs locais nunca devem ser enviados ao GitHub.
-
-O estado é persistido no caminho definido por `EFVM_DATABASE_PATH`, cujo padrão é
-`data/efvm-monitor.db`. Ao reiniciar o servidor, todos os monitores são recuperados. Cada um
-que estava ativo recebe novamente seu executor independente; os pausados permanecem parados.
-
-## Robustez e operação — Fase 9
-
-Cada worker registra resultado e duração da consulta e é recriado após falhas inesperadas de
-cliente, rede ou persistência. Um monitor com falha não interrompe os demais. Em produção, os
-logs usam JSON e aceitam apenas campos operacionais conhecidos; secrets, cookies e o ambiente do
-processo não são serializados.
-
-O limite padrão é de 10 monitoramentos visíveis por usuário, configurável por
-`EFVM_MAX_MONITORS_PER_USER` entre 1 e 100. O intervalo mínimo continua em 60 segundos.
-Tentativas repetidas de login, criação e teste de Web Push recebem HTTP `429` com `Retry-After`
-quando ultrapassam janelas temporárias em memória.
-
-O backup SQLite diário conserva 14 dias localmente. Para também cobrir perda total do disco, o
-operador deve guardar periodicamente uma cópia íntegra em armazenamento privado e criptografado.
-Restaurações permanecem manuais e exigem checkpoint; a aplicação nunca substitui o banco
-automaticamente. Veja o checklist em
-[docs/oracle-cloud-deployment.md](docs/oracle-cloud-deployment.md).
-
-## Persistência local
-
-O SQLite é inicializado automaticamente por migrations versionadas e aplicadas uma única vez.
-Não há `DROP`, `DELETE` automático ou limpeza de dados. As migrations das Fases 5 e 6 usam
-criação de tabelas, novas colunas, índices e atribuição de ownership sem apagar registros.
-
-Tabelas atuais:
-
-- `monitoring_jobs`: configuração, estado, último resultado e datas relevantes;
-- `check_history`: uma linha para cada verificação concluída;
-- `monitoring_notification_preferences`: preferência do WhatsApp e nomes exibidos no alerta;
-- `notification_deliveries`: tentativas, resultado, canal e situação dos envios;
-- `push_subscriptions`: endpoint e chaves públicas de cada navegador/dispositivo;
-- `monitoring_push_subscriptions`: vínculo entre dispositivo e monitoramento, sem broadcast;
-- `users`: contas locais, hash de senha e estado numérico;
-- `auth_sessions`: hashes dos tokens de sessão, CSRF, expiração e revogação;
-- `schema_migrations`: versões de schema já aplicadas.
-
-`monitoring_jobs.removed_at` implementa remoção lógica. Remover pela interface não executa
-`DELETE`: configuração, verificações e entregas continuam preservadas no SQLite, mas o monitor
-deixa de aparecer e não pode ser retomado pela aplicação.
-
-Registros anteriores à Fase 6 são atribuídos a um proprietário legado desabilitado. Para
-transferi-los com segurança, configure antes do cadastro da conta responsável:
-
-```dotenv
-EFVM_LEGACY_OWNER_EMAIL=responsavel@example.com
-```
-
-A transferência ocorre somente quando o e-mail cadastrado coincide exatamente. Em instalações
-novas, deixe a variável vazia. Nenhum usuário pode assumir dados legados automaticamente.
-
-O status do monitor é numérico no banco:
-
-- `0 = pausado`;
-- `1 = ativo`.
-
-O status da entrega também é numérico:
-
-- `0 = pendente`;
-- `1 = enviado`;
-- `2 = falhou`.
-
-O SQL fica centralizado em `database.py` e nos arquivos de `migrations/`. Os valores recebidos
-do usuário são enviados ao SQLite por parâmetros, sem concatenação na consulta.
-
-## Execução pelo terminal
-
-Consulta única:
-
-```bash
-efvm-monitor
-```
-
-Monitoramento contínuo com o intervalo definido por `EFVM_CHECK_INTERVAL_SECONDS`:
-
-```bash
-efvm-monitor --watch
-```
-
-Também é possível apontar para outro arquivo de configuração:
-
-```bash
-efvm-monitor --env-file caminho/consulta.env
-```
-
-Para enviar uma mensagem de teste sem consultar disponibilidade:
-
-```bash
-efvm-monitor test-whatsapp
-```
-
-Ou diretamente pelo módulo:
-
-```bash
-python -m efvm_monitor.cli test-whatsapp
-```
-
-Exemplos de saída:
-
-```text
-TEM_VAGA | O portal retornou 1 opção(ões) disponível(is).
-SEM_VAGA | O portal informou que não há passagens para a pesquisa.
-ERRO | A data excede a janela atual de venda de 45 dias.
-```
-
-Códigos de saída da consulta única:
-
-| Código | Resultado |
-| ---: | --- |
-| `0` | `TEM_VAGA` |
-| `1` | `SEM_VAGA` |
-| `2` | `ERRO`, inclusive falha no webhook |
-
-No modo contínuo, o alerta é emitido quando o estado muda para `TEM_VAGA`. Enquanto continuar
-`TEM_VAGA`, nenhuma nova mensagem é enviada. Depois de `TEM_VAGA → SEM_VAGA → TEM_VAGA`, um
-novo alerta pode ser enviado.
-
-## Web Push — canal principal gratuito
-
-A Fase 4.2 usa os padrões Service Worker, Push API, Notifications API e VAPID por meio do
-`pywebpush`. Não usa Firebase e não envia a chave privada ao navegador.
-
-Gere um par de chaves uma única vez:
+O Web Push usa padrões do navegador e VAPID; não depende de Firebase. Gere o par de chaves uma
+única vez:
 
 ```bash
 efvm-monitor generate-vapid-keys
 ```
 
-Copie o resultado para seu `.env` e informe um contato do responsável pelo servidor:
+Guarde a chave privada somente no `.env`:
 
 ```dotenv
 WEB_PUSH_ENABLED=true
-VAPID_PUBLIC_KEY=chave_publica_gerada
-VAPID_PRIVATE_KEY=chave_privada_gerada
-VAPID_SUBJECT=mailto:seu-email@example.com
-WEB_PUSH_MAX_ATTEMPTS=3
-WEB_PUSH_TIMEOUT_SECONDS=15
+VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=mailto:responsavel@example.com
 ```
 
-Nunca publique `VAPID_PRIVATE_KEY`. O endpoint `/api/push/config` entrega somente a chave
-pública. A inscrição só ocorre depois do clique em **Ativar alertas**. Cada dispositivo recebe
-um ID local não sensível e sua subscription fica no SQLite; ao iniciar um monitoramento, apenas
-os dispositivos vinculados a ele recebem o alerta.
+Nunca troque o par VAPID enquanto houver inscrições válidas. A chave privada não é entregue ao
+navegador. Endpoints expirados com HTTP `404` ou `410` são desativados; falhas temporárias usam
+tentativas limitadas e nunca interrompem o monitor.
 
-No Android/Chrome, use **Instalar aplicativo** quando o navegador oferecer essa ação. No
-iPhone/iPad, abra no Safari, use **Compartilhar → Adicionar à Tela de Início**, abra o aplicativo
-instalado e então toque em **Ativar alertas**. Web Push no iOS depende desse modo instalado.
+No iPhone/iPad, abra pelo Safari, escolha **Compartilhar → Adicionar à Tela de Início**, abra pelo
+novo ícone e toque em **Ativar alertas**. No Android, instale pelo navegador compatível e permita
+notificações quando solicitado.
 
-Os estados da tela distinguem canal pronto, ativo, bloqueado, não suportado, sem HTTPS e
-instalação necessária. O botão **Enviar teste** valida o dispositivo sem consultar passagens.
-Endpoints expirados com HTTP `404` ou `410` são desativados. HTTP `429` e respostas `5xx` usam
-tentativas limitadas; nenhuma falha de push encerra o monitor.
+## Execução pelo terminal
 
-## SMS via Twilio — opcional
-
-O SMS é uma alternativa opcional e pode gerar custos. A integração usa a API REST oficial da Twilio por meio do
-`httpx` já instalado, sem dependência adicional. Crie uma conta no
-[Twilio Console](https://console.twilio.com/), obtenha um número habilitado para SMS e preencha:
-
-```dotenv
-SMS_ENABLED=false
-SMS_PROVIDER=twilio
-TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-TWILIO_AUTH_TOKEN=seu_token
-TWILIO_FROM_NUMBER=+15551234567
-SMS_RECIPIENT_PHONE=+5531999999999
-SMS_DRY_RUN=false
-```
-
-Os telefones devem usar E.164: sinal `+`, código do país, DDD e número, sem prefixos locais.
-Contas de teste podem exigir que o destinatário seja previamente verificado. SMS pode gerar
-custos e mensagens longas podem ser cobradas em múltiplos segmentos.
-
-Teste sem depender de passagem disponível:
+Preencha origem, destino, data, classe e passageiros no `.env`. Os nomes devem corresponder ao
+catálogo do portal; IDs numéricos também são aceitos.
 
 ```bash
+# uma consulta
+efvm-monitor
+
+# execução contínua
+efvm-monitor --watch
+
+# arquivo de ambiente alternativo
+efvm-monitor --env-file caminho/consulta.env
+
+# testes isolados de canais opcionais
 efvm-monitor test-sms
+efvm-monitor test-whatsapp
 ```
 
-Para habilitar o canal, altere `SMS_ENABLED=true`. Antes do primeiro envio real, use
-`SMS_DRY_RUN=true`. Nesse modo a mensagem, validação,
-deduplicação e persistência são exercitadas, mas a Twilio não é chamada. Para desativar o canal,
-use `SMS_ENABLED=false`.
+A consulta única usa os códigos de saída `0 = TEM_VAGA`, `1 = SEM_VAGA` e `2 = ERRO`.
 
-O destinatário é exibido e salvo apenas de forma mascarada. O Auth Token nunca é persistido nem
-registrado em log. Falhas de autenticação, saldo, HTTP, timeout ou indisponibilidade ficam
-registradas como falha de entrega e não encerram o monitor.
+## Persistência
 
-## WhatsApp Cloud API — opcional
+O SQLite é criado e atualizado automaticamente por migrations incrementais. A inicialização não
+executa `DROP`, limpeza geral ou substituição do banco existente. SQL fica centralizado na camada
+de acesso `database.py` e usa parâmetros para valores recebidos.
 
-O canal complementar usa exclusivamente a
-[WhatsApp Cloud API oficial da Meta](https://developers.facebook.com/docs/whatsapp/cloud-api/).
-Não usa WhatsApp Web, navegador aberto, leitura de QR Code ou automação visual.
+Principais tabelas:
 
-Crie uma aplicação na Meta, configure um número remetente e preencha no `.env`:
+- `users` e `auth_sessions`;
+- `monitoring_jobs` e `check_history`;
+- `push_subscriptions` e `monitoring_push_subscriptions`;
+- `notification_deliveries` e preferências de canais;
+- `schema_migrations`.
 
-```dotenv
-WHATSAPP_ENABLED=true
-WHATSAPP_ACCESS_TOKEN=
-WHATSAPP_PHONE_NUMBER_ID=
-WHATSAPP_RECIPIENT_PHONE=5531999999999
-WHATSAPP_API_VERSION=v26.0
-```
+A remoção de um monitor é lógica: ele deixa de aparecer e de executar, mas configuração,
+histórico e entregas permanecem disponíveis para integridade operacional. Dados anteriores ao
+modelo de usuários podem ser assumidos uma única vez por uma conta explicitamente configurada
+em `EFVM_LEGACY_OWNER_EMAIL`.
 
-O destinatário deve usar o formato internacional, somente com números. A versão da Graph API
-fica configurável porque a Meta atualiza suas versões periodicamente.
-
-Para mensagens iniciadas pela aplicação fora da janela de atendimento, configure um template
-aprovado no WhatsApp Manager:
-
-```dotenv
-WHATSAPP_TEMPLATE_NAME=alerta_disponibilidade_efvm
-WHATSAPP_TEMPLATE_LANGUAGE=pt_BR
-```
-
-O template deve possuir sete parâmetros de corpo, nesta ordem: origem, destino, data, classe,
-passageiros, horário da detecção e link oficial. Sem `WHATSAPP_TEMPLATE_NAME`, a integração
-envia texto livre, adequado apenas quando as regras vigentes da conta e da janela de conversa
-permitirem.
-
-Falhas temporárias de conexão, HTTP `429` e respostas `5xx` usam tentativas limitadas com
-espera crescente. Uma conexão interrompida depois que o envio pode ter começado não é repetida
-automaticamente, reduzindo o risco de mensagem duplicada. Toda falha é registrada e nunca
-interrompe o monitoramento.
-
-O `.env` já está protegido pelo `.gitignore`. Nunca copie token, número privado ou credencial
-para `.env.example`, código, commit, captura de tela ou relatório de teste.
-
-## Webhook complementar
-
-Defina `ALERT_WEBHOOK_URL` para receber um `POST` JSON quando houver vaga:
-
-```dotenv
-ALERT_WEBHOOK_URL=https://seu-servico.example/alerta
-```
-
-O corpo contém apenas status, trajeto, data, classe, quantidade de opções e o link do portal.
-Não contém CPF, credenciais, dados de pagamento ou token de compra. O webhook foi preservado
-por compatibilidade, mas não é o canal principal.
-
-## Testes e qualidade
+## Desenvolvimento e qualidade
 
 ```bash
-pytest
-ruff check .
+python -m pytest -q
+python -m ruff check .
+node --check src/efvm_monitor/static/app.js
+node --check src/efvm_monitor/static/auth.js
+node --check src/efvm_monitor/static/service-worker.js
 ```
 
-Os testes locais verificam a classificação dos três estados, migrations idempotentes,
-persistência, histórico, retomada após reinicialização, deduplicação de alertas, retry,
-continuidade após falha de notificação, subscriptions Web Push, invalidação `404`/`410`,
-proteção da chave VAPID privada, service worker, serviço em segundo plano, rotas e validações
-do formulário, onboarding, estados mobile da Fase 8, recuperação de worker, health operacional,
-limites por usuário e rate limiting. Eles não fazem chamadas ao portal nem enviam mensagens
-reais.
+Os testes não consultam o portal nem enviam mensagens reais. Eles cobrem classificação de
+disponibilidade, migrations, persistência, isolamento/IDOR, sessões, CSRF, rate limiting,
+múltiplos monitores, concorrência, retomada, histórico, deduplicação, falhas externas, Web Push,
+dispositivo inválido, healthcheck, recuperação de workers e rotas web.
 
-## Rotas locais
+O workflow em `.github/workflows/ci.yml` repete testes, Ruff e validação JavaScript em pushes e
+pull requests para `main`. O Dependabot revisa semanalmente pacotes Python e GitHub Actions.
+Deploy permanece manual para não manter credenciais da VM no GitHub.
 
-| Método | Rota | Função |
+## Deploy e operação
+
+A implantação de referência usa Oracle Cloud Always Free, Caddy, systemd e SQLite persistente. O
+passo a passo, configurações, backup, restauração e checklists estão em
+[docs/oracle-cloud-deployment.md](docs/oracle-cloud-deployment.md).
+
+Em produção:
+
+- defina `EFVM_COOKIE_SECURE=true`;
+- mantenha `.env`, SQLite, backups, logs e chave VAPID fora do checkout;
+- exponha somente SSH, HTTP e HTTPS; o Uvicorn permanece em `127.0.0.1:8000`;
+- execute uma única instância do serviço;
+- preserve domínio/origin, banco e par VAPID;
+- valide `GET /healthz` e `GET /healthz?details=true` após cada deploy.
+
+```bash
+curl --fail https://efvm-monitor-rhayner.duckdns.org/healthz
+```
+
+O backup local diário mantém 14 dias. Para cobrir perda total do disco, o operador deve guardar
+periodicamente uma cópia íntegra em local privado e criptografado. Restaurações são manuais e
+nunca sobrescrevem o banco automaticamente.
+
+## Segurança e privacidade
+
+- hash de senha com `scrypt` e salt aleatório;
+- cookie de sessão opaco, `HttpOnly`, `SameSite=Lax` e `Secure` em produção;
+- hash do token de sessão persistido, sem token puro no SQLite;
+- CSRF em operações de escrita e ownership no backend;
+- CSP, bloqueio de frames, restrição de recursos do navegador e HSTS sob HTTPS;
+- limites defensivos de autenticação, criação e teste de push;
+- logs sem senhas, cookies, tokens ou chaves privadas;
+- `.env`, bancos, logs, backups e chaves ignorados pelo Git.
+
+Consulte [SECURITY.md](SECURITY.md) para relato responsável, [PRIVACY.md](PRIVACY.md) para os
+dados realmente armazenados e [TERMS.md](TERMS.md) para limites e uso responsável.
+
+## Rotas principais
+
+| Método | Rota | Finalidade |
 | --- | --- | --- |
-| `GET` | `/healthz` | Verifica SQLite e correspondência entre monitores e workers |
-| `GET` | `/` | Exibe a interface |
-| `GET` | `/api/catalogo` | Lista estações, classes e janela de venda |
-| `POST` | `/api/monitoramento` | Inicia um monitoramento |
-| `GET` | `/api/monitoramento` | Consulta o estado atual |
-| `GET` | `/api/monitoramento/historico` | Consulta o histórico do monitor atual |
-| `DELETE` | `/api/monitoramento` | Solicita a parada |
-| `POST` | `/api/monitoramentos` | Cria e inicia um monitor com ID próprio |
-| `GET` | `/api/monitoramentos` | Lista todos os monitores visíveis |
-| `GET` | `/api/monitoramentos/{id}` | Consulta um monitor específico |
-| `POST` | `/api/monitoramentos/{id}/pausar` | Pausa somente o ID informado |
-| `POST` | `/api/monitoramentos/{id}/retomar` | Retoma somente o ID informado |
-| `DELETE` | `/api/monitoramentos/{id}` | Remove logicamente somente o ID informado |
-| `GET` | `/api/monitoramentos/{id}/historico` | Consulta o histórico daquele ID |
-| `GET` | `/api/push/config` | Entrega apenas a configuração pública do Web Push |
-| `GET` | `/api/push/status` | Consulta o vínculo do dispositivo atual |
-| `POST` | `/api/push/subscribe` | Salva e vincula uma subscription |
-| `POST` | `/api/push/unsubscribe` | Desativa uma subscription sem apagar histórico |
-| `POST` | `/api/push/test` | Envia uma notificação de teste ao dispositivo |
-| `GET` | `/manifest.webmanifest` | Entrega o manifesto da PWA |
-| `GET` | `/service-worker.js` | Entrega o service worker no escopo raiz |
+| `GET` | `/healthz` | Saúde do servidor, SQLite, manager e workers |
+| `GET` | `/` | Dashboard autenticado |
+| `POST` | `/api/auth/cadastro` | Criar conta |
+| `POST` | `/api/auth/login` | Iniciar sessão |
+| `POST` | `/api/auth/logout` | Revogar sessão |
+| `GET` | `/api/catalogo` | Estações, classes e janela de venda |
+| `POST` | `/api/monitoramentos` | Criar monitor |
+| `GET` | `/api/monitoramentos` | Listar monitores do usuário |
+| `POST` | `/api/monitoramentos/{id}/pausar` | Pausar monitor próprio |
+| `POST` | `/api/monitoramentos/{id}/retomar` | Retomar monitor próprio |
+| `DELETE` | `/api/monitoramentos/{id}` | Remover logicamente monitor próprio |
+| `GET` | `/api/monitoramentos/{id}/historico` | Histórico do monitor próprio |
+| `POST` | `/api/push/subscribe` | Vincular dispositivo ao usuário |
+| `POST` | `/api/push/unsubscribe` | Desativar dispositivo |
+| `POST` | `/api/push/test` | Testar Web Push do dispositivo |
 
-## Estrutura
-
-```text
-src/efvm_monitor/
-├── checker.py   # catálogos públicos, consulta e classificação
-├── cli.py       # execução única/contínua e logs
-├── config.py    # leitura e validação do .env
-├── database.py  # camada exclusiva de acesso ao SQLite
-├── manager.py   # executores concorrentes e operações independentes por ID
-├── migrations/  # evolução idempotente do schema local
-├── monitor.py   # ciclo em segundo plano, persistência e retomada
-├── network.py   # HTTPS verificado com certificados do sistema
-├── notifier.py  # SMS/Twilio, WhatsApp, retry e canais complementares
-├── web_push.py  # VAPID, payload, retry e invalidação de subscriptions
-├── web.py       # servidor e rotas locais
-├── static/      # manifesto, service worker, ícones, estilos e interação
-└── templates/   # página HTML
-tests/
-├── test_checker.py
-├── test_cli.py
-├── test_database.py
-├── test_manager.py
-├── test_monitor.py
-├── test_multiple_web.py
-├── test_notifier.py
-├── test_sms.py
-├── test_web.py
-├── test_web_push.py
-└── test_web_push_api.py
-```
+As rotas de dados exigem sessão; operações de escrita também exigem CSRF. IDs de outro usuário
+retornam recurso não encontrado.
 
 ## Limitações conhecidas
 
-- o portal pode alterar URLs, campos ou respostas;
-- disponibilidade pode desaparecer entre o alerta e a compra manual;
-- `TEM_VAGA` significa que o portal retornou ao menos uma opção naquele instante, não uma
-  reserva garantida;
-- uma resposta inesperada é classificada como `ERRO`, nunca como ausência de vaga;
-- o monitor depende da janela de venda informada dinamicamente pelo portal.
-- uma configuração salva cuja data já expirou é recuperada como `ERRO` e não é iniciada;
-- cada monitor aceita exatamente um passageiro nesta fase, mas classe, trajeto e intervalo
-  permanecem armazenados de forma independente;
-- muitos monitores aumentam o número de consultas ao portal; use intervalos responsáveis e
-  não duplique pesquisas equivalentes;
-- o envio real depende de uma conta Meta válida, destinatário permitido e, quando aplicável,
-  template aprovado;
-- o Web Push depende do suporte do navegador, de permissão explícita e de HTTPS fora do
-  ambiente local de desktop;
-- validação em aparelhos físicos não pode ser substituída pelos testes automatizados e deve
-  ser realizada quando houver uma URL HTTPS acessível ao iPhone ou Android;
+- a disponibilidade pode desaparecer entre alerta e compra;
+- o portal pode alterar interfaces, campos ou respostas sem aviso;
+- Web Push depende do navegador, sistema operacional e serviço de push;
+- não há recuperação de senha, confirmação de e-mail, OAuth ou exclusão automática de conta;
+- rate limiting fica em memória e pressupõe uma única instância;
+- SQLite e um único manager atendem o estágio atual, não uma escala horizontal;
+- a instância pública não possui SLA;
+- SMS pode gerar custos e WhatsApp permanece opcional/desativado na interface multiusuário.
 
-## Uso responsável
+## Roadmap
 
-Este projeto é independente e não possui afiliação com a Vale. Consulte com baixa frequência,
-não execute várias instâncias para a mesma pesquisa e use sempre o site ou aplicativo oficial
-para qualquer compra.
+- [x] consulta e estados de disponibilidade;
+- [x] interface, SQLite, histórico e notificações;
+- [x] múltiplos monitores, PWA e Web Push;
+- [x] usuários, sessões e isolamento de dados;
+- [x] produção HTTPS contínua em Oracle Always Free;
+- [x] refinamento mobile e onboarding;
+- [x] robustez, observabilidade, limites e backups;
+- [x] preparação pública, segurança final, políticas, CI e documentação.
+
+Evoluções futuras devem ser propostas e avaliadas separadamente. O princípio permanente continua:
+**consultar disponibilidade e alertar, sem automatizar a compra.**
+
+## Licença
+
+Distribuído sob a [licença MIT](LICENSE). Ela foi mantida por ser curta, permissiva e adequada a
+um projeto educacional que pode ser estudado, auditado e adaptado, preservando o aviso de
+copyright e a ausência de garantias. A licença do código não concede direitos sobre marcas ou
+serviços de terceiros.
