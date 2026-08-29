@@ -14,6 +14,10 @@
     <script defer src="{{ url_for('static', path='/app.js') }}"></script>
   </head>
   <body data-minimum-date="{{ minimum_date }}">
+    <div id="connection-banner" class="connection-banner" role="status" hidden>
+      Você está sem internet. Seus monitores continuam no servidor e a tela será atualizada
+      quando a conexão voltar.
+    </div>
     <header class="site-header">
       <div class="header-content">
         <a class="brand" href="/" aria-label="Página inicial do EFVM Monitor">
@@ -45,12 +49,79 @@
 
     <main class="page-shell">
       <section class="intro" aria-labelledby="page-title">
-        <p class="eyebrow">Monitoramento local</p>
+        <p class="eyebrow">Seu monitor de passagens</p>
         <h1 id="page-title">Encontre a passagem. A compra continua sendo sua.</h1>
         <p>
-          Escolha o trajeto e a data. O monitor consulta a disponibilidade e avisa quando
-          encontrar uma opção, sem reservar assento e sem acessar sua conta na Vale.
+          O EFVM Monitor procura a passagem por você e avisa quando aparecer. Ele não reserva
+          assento, não compra e não acessa sua conta na Vale.
         </p>
+      </section>
+
+      <section id="onboarding" class="panel onboarding-panel" aria-labelledby="onboarding-title">
+        <div class="onboarding-heading">
+          <div>
+            <p class="step-label">Primeiros passos</p>
+            <h2 id="onboarding-title">Deixe tudo pronto para receber o alerta</h2>
+          </div>
+          <span id="onboarding-progress" class="onboarding-progress" role="status">
+            Verificando…
+          </span>
+        </div>
+
+        <ol class="onboarding-steps">
+          <li id="onboarding-account" class="onboarding-step is-complete">
+            <span class="onboarding-step-marker" aria-hidden="true">✓</span>
+            <span>
+              <strong>Conta criada</strong>
+              <small>Seus monitores e dispositivos ficam protegidos na sua conta.</small>
+            </span>
+          </li>
+          <li id="onboarding-monitor" class="onboarding-step">
+            <span class="onboarding-step-marker" aria-hidden="true">2</span>
+            <span>
+              <strong>Escolha uma viagem</strong>
+              <small>Informe origem, destino, data e classe para começar.</small>
+            </span>
+          </li>
+          <li id="onboarding-install" class="onboarding-step">
+            <span class="onboarding-step-marker" aria-hidden="true">3</span>
+            <span>
+              <strong>Instale o EFVM Monitor</strong>
+              <small id="install-status">Verificando este dispositivo…</small>
+              <span id="ios-install-help" class="platform-install-help" hidden>
+                No iPhone: abra no Safari, toque em Compartilhar, escolha “Adicionar à Tela de
+                Início” e depois abra pelo novo ícone.
+              </span>
+              <span id="android-install-help" class="platform-install-help" hidden>
+                No Android: toque em “Instalar aplicativo”, abra pelo novo ícone e permita as
+                notificações quando solicitado.
+              </span>
+              <span id="desktop-install-help" class="platform-install-help" hidden>
+                Neste computador, use “Instalar aplicativo” quando o navegador oferecer a opção.
+              </span>
+              <button id="install-app" class="text-button" type="button" hidden>
+                Instalar aplicativo
+              </button>
+            </span>
+          </li>
+          <li id="onboarding-push" class="onboarding-step">
+            <span class="onboarding-step-marker" aria-hidden="true">4</span>
+            <span>
+              <strong>Ative as notificações</strong>
+              <small id="onboarding-push-status">Verificando a proteção deste dispositivo…</small>
+            </span>
+          </li>
+        </ol>
+
+        <aside id="device-summary" class="device-summary" data-state="checking" aria-live="polite">
+          <span class="device-summary-icon" aria-hidden="true">●</span>
+          <span>
+            <strong id="device-summary-title">Verificando este dispositivo</strong>
+            <small id="device-summary-description">
+              Aguarde enquanto confirmamos a instalação e os alertas.
+            </small>
+          </span>
+        </aside>
       </section>
 
       <div class="content-grid">
@@ -109,8 +180,8 @@
               </label>
             </div>
 
-            <fieldset class="alert-options">
-              <legend>Alertas</legend>
+            <fieldset id="alerts" class="alert-options">
+              <legend id="alerts-title">Alertas</legend>
               <div class="notification-option notification-primary push-option">
                 <span class="push-symbol" aria-hidden="true">↗</span>
                 <span class="push-copy">
@@ -123,11 +194,6 @@
                     <button id="activate-push" class="text-button" type="button">Ativar alertas</button>
                     <button id="test-push" class="text-button" type="button" hidden>Enviar teste</button>
                     <button id="disable-push" class="text-button" type="button" hidden>Desativar</button>
-                    <button id="install-app" class="text-button" type="button" hidden>Instalar aplicativo</button>
-                  </span>
-                  <span id="ios-install-help" class="ios-install-help" hidden>
-                    No iPhone, abra no Safari, toque em Compartilhar e escolha “Adicionar à Tela de Início”.
-                    Depois abra o aplicativo instalado para ativar os alertas.
                   </span>
                 </span>
               </div>
@@ -187,10 +253,19 @@
             <span id="status-badge" class="status-badge status-parado">0 MONITORES</span>
           </div>
 
-          <p id="monitors-empty" class="monitors-empty">
-            Nenhum monitoramento configurado. Adicione a primeira viagem no Passo 1.
+          <p id="dashboard-state" class="dashboard-state" role="status">
+            Carregando seus monitoramentos…
           </p>
-          <div id="monitors-list" class="monitors-list" aria-live="polite"></div>
+          <p id="monitors-empty" class="monitors-empty" hidden>
+            Você ainda não acompanha nenhuma viagem. Preencha o Passo 1 para criar seu primeiro
+            monitor.
+          </p>
+          <div
+            id="monitors-list"
+            class="monitors-list"
+            aria-live="polite"
+            aria-busy="true"
+          ></div>
 
           <div id="current-monitor-detail" hidden>
             <div class="status-display">
@@ -198,6 +273,7 @@
               <div>
                 <strong id="status-message">Selecione um monitoramento.</strong>
                 <p id="last-check">A última verificação aparecerá aqui.</p>
+                <p id="next-check">A próxima verificação aparecerá aqui.</p>
               </div>
             </div>
 
