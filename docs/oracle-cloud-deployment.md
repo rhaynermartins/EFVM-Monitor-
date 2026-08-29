@@ -114,6 +114,47 @@ Uma atualização automática futura precisa usar o token DuckDNS somente em arq
 VM. Nunca coloque esse token em script versionado, unit systemd, documentação ou linha de comando
 que possa permanecer no histórico.
 
+## Cadeia TLS do portal da Vale
+
+Em 29 de agosto de 2026, `tremdepassageiros.vale.com` apresentava somente o certificado leaf e
+omitia o intermediário declarado em seu AIA. `curl`, OpenSSL, o contexto padrão do Python e o
+`truststore` falhavam corretamente com `unable to get local issuer certificate`.
+
+A cadeia pública verificada é:
+
+```text
+tremdepassageiros.vale.com
+→ DigiCert Global G2 TLS RSA SHA256 2020 CA1
+→ DigiCert Global Root G2
+```
+
+O projeto inclui somente o intermediário público obtido do repositório oficial da DigiCert. Seu
+SHA-256 esperado é:
+
+```text
+C8:02:5F:9F:C6:5F:DF:C9:5B:3C:A8:CC:78:67:B9:A5:
+87:B5:27:79:73:95:79:17:46:3F:C8:13:D0:B6:25:A9
+```
+
+Esse intermediário é carregado exclusivamente pelo cliente HTTP da Vale. O trust store global da
+VM e os clientes de Web Push, WhatsApp, SMS e webhook não são modificados. O contexto continua
+com validação de hostname e `CERT_REQUIRED`; uma divergência do fingerprint interrompe a criação
+do cliente em vez de reduzir a segurança.
+
+Para diagnosticar a cadeia apresentada pelo servidor sem desativar TLS:
+
+```bash
+openssl s_client \
+  -connect tremdepassageiros.vale.com:443 \
+  -servername tremdepassageiros.vale.com \
+  -showcerts \
+  -verify_return_error </dev/null
+```
+
+Se a Vale passar a entregar a cadeia completa ou trocar de autoridade intermediária, reavalie o
+arquivo somente contra a fonte oficial da CA. Nunca substitua essa configuração por
+`verify=False`, `CERT_NONE`, `check_hostname=False` ou uma CA obtida de fonte não oficial.
+
 ## PWA e Web Push no iPhone
 
 O teste físico deve ser feito no Safari com a URL HTTPS:
