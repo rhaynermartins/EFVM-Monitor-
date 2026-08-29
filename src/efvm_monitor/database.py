@@ -207,6 +207,15 @@ class MonitoringRepository:
                 )
             connection.commit()
 
+    def is_available(self) -> bool:
+        """Confirma que o banco inicializado aceita uma consulta simples."""
+        try:
+            with self._connect() as connection:
+                connection.execute("SELECT 1 FROM schema_migrations LIMIT 1").fetchone()
+        except sqlite3.Error:
+            return False
+        return True
+
     def create_monitor(
         self,
         settings: Settings,
