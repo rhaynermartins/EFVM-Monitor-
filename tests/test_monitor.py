@@ -47,6 +47,16 @@ class TransitionClient(FakeClient):
         )
 
 
+class RecoveringClient(FakeClient):
+    attempts = 0
+
+    def check(self) -> AvailabilityResult:
+        type(self).attempts += 1
+        if type(self).attempts == 1:
+            raise RuntimeError("Falha inesperada temporária.")
+        return AvailabilityResult(AvailabilityStatus.SEM_VAGA, "Consulta recuperada.")
+
+
 def settings() -> Settings:
     return Settings(
         origin="7185",
@@ -136,5 +146,21 @@ def test_monitor_rejects_simultaneous_start() -> None:
     with pytest.raises(MonitorAlreadyRunning, match="Já existe"):
         service.start(settings())
 
+    service.stop()
+    wait_for_status(service, "PARADO")
+
+
+def test_monitor_recreates_worker_client_after_unexpected_failure() -> None:
+    RecoveringClient.attempts = 0
+    service = MonitorService(
+        client_factory=RecoveringClient,
+        notifier=lambda *_: None,
+    )
+
+    service.start(settings())
+    wait_for_status(service, "SEM_VAGA")
+
+    assert RecoveringClient.attempts >= 2
+    assert service.snapshot().running is True
     service.stop()
     wait_for_status(service, "PARADO")
