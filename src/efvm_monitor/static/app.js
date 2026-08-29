@@ -19,6 +19,7 @@ const elements = {
   iosInstallHelp: document.querySelector("#ios-install-help"),
   androidInstallHelp: document.querySelector("#android-install-help"),
   desktopInstallHelp: document.querySelector("#desktop-install-help"),
+  installTitle: document.querySelector("#install-title"),
   installStatus: document.querySelector("#install-status"),
   onboarding: document.querySelector("#onboarding"),
   onboardingProgress: document.querySelector("#onboarding-progress"),
@@ -520,7 +521,8 @@ async function loadHistory(monitoringId = selectedMonitorId) {
 }
 
 function isIos() {
-  return /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+  return /iphone|ipad|ipod/i.test(window.navigator.userAgent) ||
+    (window.navigator.platform === "MacIntel" && window.navigator.maxTouchPoints > 1);
 }
 
 function isAndroid() {
@@ -605,14 +607,18 @@ function configureInstallationExperience() {
   elements.installApp.hidden = !deferredInstallPrompt || appInstalled;
 
   if (appInstalled) {
-    elements.installStatus.textContent = "Aplicativo instalado neste dispositivo.";
+    elements.installTitle.textContent = "Aplicativo instalado";
+    elements.installStatus.textContent = "O EFVM já está pronto neste dispositivo.";
   } else if (isIos()) {
-    elements.installStatus.textContent = "Falta adicionar o aplicativo à Tela de Início.";
+    elements.installTitle.textContent = "Instale o EFVM no seu iPhone";
+    elements.installStatus.textContent = "Siga os passos abaixo para receber alertas com o aplicativo fechado.";
     elements.iosInstallHelp.hidden = false;
   } else if (isAndroid()) {
-    elements.installStatus.textContent = "Instale para abrir com facilidade pelo celular.";
+    elements.installTitle.textContent = "Instale o EFVM no seu celular";
+    elements.installStatus.textContent = "Use o Chrome e siga os passos abaixo.";
     elements.androidInstallHelp.hidden = false;
   } else {
+    elements.installTitle.textContent = "Instale o EFVM";
     elements.installStatus.textContent = "A instalação é opcional neste computador.";
     elements.desktopInstallHelp.hidden = false;
   }
