@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import json
 import logging
 import os
 import sys
@@ -31,6 +32,35 @@ EXIT_CODES = {
     AvailabilityStatus.SEM_VAGA: 1,
     AvailabilityStatus.ERRO: 2,
 }
+STRUCTURED_LOG_FIELDS = (
+    "event",
+    "monitoring_id",
+    "user_id",
+    "result",
+    "duration_ms",
+    "channel",
+    "attempts",
+    "status_code",
+)
+
+
+class JsonLogFormatter(logging.Formatter):
+    """Serializa somente campos operacionais conhecidos, sem ambiente ou secrets."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, object] = {
+            "timestamp": datetime.now().astimezone().isoformat(timespec="milliseconds"),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        for field in STRUCTURED_LOG_FIELDS:
+            value = getattr(record, field, None)
+            if value is not None:
+                payload[field] = value
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -59,7 +89,13 @@ def _parser() -> argparse.ArgumentParser:
 def _configure_logging(level: str) -> None:
     log_directory = Path("logs")
     log_directory.mkdir(exist_ok=True)
-    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+    formatter: logging.Formatter
+    if os.getenv("EFVM_LOG_FORMAT", "text").strip().casefold() == "json":
+        formatter = JsonLogFormatter()
+    else:
+        formatter = logging.Formatter(
+            "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+        )
 
     console = logging.StreamHandler(sys.stderr)
     console.setFormatter(formatter)
