@@ -293,9 +293,41 @@ def test_healthcheck_is_public_and_confirms_database(tmp_path: Path) -> None:
 
     with TestClient(application) as client:
         response = client.get("/healthz")
+        detailed = client.get("/healthz?details=true")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "database": "ok"}
+    assert detailed.status_code == 200
+    assert detailed.json()["manager"] == {
+        "status": "ok",
+        "active_monitors": 0,
+        "registered_workers": 0,
+        "running_workers": 0,
+        "stalled_workers": 0,
+        "orphaned_workers": 0,
+    }
+
+
+def test_monitor_creation_returns_conflict_at_configured_user_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("EFVM_MAX_MONITORS_PER_USER", "1")
+    storage = MonitoringRepository(tmp_path / "limit.db")
+    application = create_app(
+        repository=storage,
+        catalog_provider=lambda: CATALOG,
+        authentication_enabled=False,
+    )
+
+    with TestClient(application) as client:
+        client.headers["X-CSRF-Token"] = "test-csrf-token"
+        first = client.post("/api/monitoramentos", json=valid_payload())
+        second = client.post("/api/monitoramentos", json=valid_payload())
+
+    assert first.status_code == 202
+    assert second.status_code == 409
+    assert second.json()["detail"] == "O limite de 1 monitoramentos foi atingido."
 
 
 def test_recovers_active_monitor_and_history_after_restart(tmp_path: Path) -> None:
