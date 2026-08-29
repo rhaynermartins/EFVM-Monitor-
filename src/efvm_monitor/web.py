@@ -257,6 +257,7 @@ def create_app(
         return session
 
     public_paths = {
+        "/healthz",
         "/login",
         "/cadastro",
         "/manifest.webmanifest",
@@ -296,6 +297,15 @@ def create_app(
         StaticFiles(directory=PACKAGE_DIRECTORY / "static"),
         name="static",
     )
+
+    @application.get("/healthz", include_in_schema=False)
+    def healthcheck() -> JSONResponse:
+        if storage is None or not storage.is_available():
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={"status": "degraded", "database": "unavailable"},
+            )
+        return JSONResponse({"status": "ok", "database": "ok"})
 
     @application.get("/login", response_class=HTMLResponse)
     def login_page(request: Request) -> HTMLResponse:
