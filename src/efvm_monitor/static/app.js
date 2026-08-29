@@ -49,6 +49,7 @@ const elements = {
   summaryInterval: document.querySelector("#summary-interval"),
   summaryAlerts: document.querySelector("#summary-alerts"),
   refreshHistory: document.querySelector("#refresh-history"),
+  historySection: document.querySelector("#monitor-history"),
   historyEmpty: document.querySelector("#history-empty"),
   historyList: document.querySelector("#history-list"),
   logoutButton: document.querySelector("#logout-button"),
@@ -420,7 +421,10 @@ function renderMonitors(items) {
           selectedMonitorId = state.monitoring_id;
           renderMonitors(currentMonitors);
           renderState(state);
-          await loadHistory(state.monitoring_id);
+          const historyDisplayed = await loadHistory(state.monitoring_id);
+          if (historyDisplayed) {
+            elements.historySection.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
         },
         false,
         `Ver histórico da viagem de ${routeLabel}`,
@@ -504,19 +508,25 @@ function renderHistory(items) {
 
 async function loadHistory(monitoringId = selectedMonitorId) {
   if (!monitoringId) {
+    delete elements.historySection.dataset.monitoringId;
     renderHistory([]);
-    return;
+    return false;
   }
+  elements.historySection.dataset.monitoringId = String(monitoringId);
   try {
     const history = await fetchJson(
       `/api/monitoramentos/${monitoringId}/historico?limit=10`,
     );
+    if (monitoringId !== selectedMonitorId) return false;
     renderHistory(history.items);
+    return true;
   } catch (error) {
+    if (monitoringId !== selectedMonitorId) return false;
     console.error("Não foi possível carregar o histórico.", error);
     elements.historyList.replaceChildren();
     elements.historyEmpty.hidden = false;
     elements.historyEmpty.textContent = "Não foi possível carregar o histórico agora. Tente novamente.";
+    return true;
   }
 }
 
