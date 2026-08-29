@@ -9,7 +9,11 @@ import pytest
 from efvm_monitor.checker import AvailabilityResult, AvailabilityStatus
 from efvm_monitor.config import Settings
 from efvm_monitor.database import MonitoringRepository, PersistedMonitor
-from efvm_monitor.manager import MonitoringManager, MonitoringNotFound
+from efvm_monitor.manager import (
+    MonitoringLimitReached,
+    MonitoringManager,
+    MonitoringNotFound,
+)
 
 
 class RouteClient:
@@ -142,3 +146,45 @@ def test_restores_all_active_monitors_after_restart(tmp_path: Path) -> None:
     wait_for_status(restarted, first.monitoring_id, "TEM_VAGA")
     wait_for_status(restarted, second.monitoring_id, "SEM_VAGA")
     restarted.shutdown()
+
+
+def test_limits_visible_monitors_per_user_without_blocking_after_removal(
+    tmp_path: Path,
+) -> None:
+    storage = MonitoringRepository(tmp_path / "limited.db")
+    storage.initialize()
+    service = MonitoringManager(
+        storage,
+        client_factory=RouteClient,
+        notifier=lambda *_: None,
+        max_monitors_per_user=1,
+    )
+    first = service.create(settings("origem-a", "destino-a"))
+    assert first.monitoring_id is not None
+
+    with pytest.raises(MonitoringLimitReached, match="limite de 1"):
+        service.create(settings("origem-b", "destino-b"))
+
+    service.remove(first.monitoring_id)
+    replacement = service.create(settings("origem-b", "destino-b"))
+    assert replacement.monitoring_id != first.monitoring_id
+    service.shutdown()
+
+
+def test_operational_status_detects_active_monitor_without_worker(tmp_path: Path) -> None:
+    storage = MonitoringRepository(tmp_path / "stalled.db")
+    storage.initialize()
+    monitor = storage.create_monitor(settings("origem-a", "destino-a"))
+    service = MonitoringManager(storage, notifier=lambda *_: None)
+
+    health = service.operational_status()
+
+    assert monitor.active is True
+    assert health == {
+        "status": "degraded",
+        "active_monitors": 1,
+        "registered_workers": 0,
+        "running_workers": 0,
+        "stalled_workers": 1,
+        "orphaned_workers": 0,
+    }
