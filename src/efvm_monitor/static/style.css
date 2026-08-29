@@ -494,6 +494,18 @@ a {
   border-color: rgb(23 107 77 / 24%);
 }
 
+.push-option[data-state="attention"],
+.push-option[data-state="needs-renewal"] {
+  background: var(--yellow-soft);
+  border-color: rgb(168 111 0 / 22%);
+}
+
+.push-option[data-state="blocked"],
+.push-option[data-state="unavailable"] {
+  background: var(--red-soft);
+  border-color: rgb(177 58 50 / 20%);
+}
+
 .push-option {
   cursor: default;
 }
