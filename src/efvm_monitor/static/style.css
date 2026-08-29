@@ -158,19 +158,6 @@ a {
   padding: 64px 0 44px;
 }
 
-.user-greeting {
-  max-width: 100%;
-  margin: 0 0 12px;
-  color: var(--muted);
-  font-size: 0.9rem;
-  overflow-wrap: anywhere;
-}
-
-.user-greeting strong {
-  color: var(--ink);
-  font-weight: 750;
-}
-
 .intro {
   max-width: 750px;
   margin-bottom: 36px;
@@ -446,6 +433,8 @@ a {
   display: grid;
   gap: 7px;
   min-width: 0;
+  max-width: 100%;
+  width: 100%;
 }
 
 .field > span {
@@ -467,6 +456,14 @@ a {
   border-radius: 11px;
   outline: none;
   transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+
+.field input[type="date"] {
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  -webkit-min-logical-width: 0;
 }
 
 .field input:hover,
@@ -1177,7 +1174,7 @@ footer {
 
   .account-name {
     flex: 0 1 auto;
-    max-width: min(40vw, 150px);
+    max-width: min(48vw, 175px);
   }
 
   .page-shell {
