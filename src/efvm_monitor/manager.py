@@ -123,10 +123,8 @@ class MonitoringManager:
             if current is not None and current.snapshot().running:
                 raise MonitorAlreadyRunning(f"O monitoramento {monitoring_id} já está ativo.")
             self._services.pop(monitoring_id, None)
-
-        service = self._new_service()
-        snapshot = service.start(settings, monitoring_id=monitor.id, user_id=user_id)
-        with self._lock:
+            service = self._new_service()
+            snapshot = service.start(settings, monitoring_id=monitor.id, user_id=user_id)
             self._services[monitoring_id] = service
         return snapshot
 
