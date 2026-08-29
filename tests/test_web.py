@@ -114,6 +114,34 @@ def test_home_renders_complete_form(web_client: tuple[TestClient, StubMonitor]) 
     assert response.text.index("Configure a viagem") < response.text.index("Acompanhe o estado")
 
 
+def test_public_responses_include_browser_security_headers(
+    web_client: tuple[TestClient, StubMonitor],
+) -> None:
+    client, _ = web_client
+
+    response = client.get("https://testserver/login")
+
+    assert response.status_code == 200
+    assert response.headers["content-security-policy"].startswith("default-src 'self'")
+    assert response.headers["permissions-policy"] == (
+        "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
+    )
+    assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["strict-transport-security"] == "max-age=31536000"
+
+
+def test_framework_documentation_is_not_public(
+    web_client: tuple[TestClient, StubMonitor],
+) -> None:
+    client, _ = web_client
+
+    assert client.get("/docs").status_code == 404
+    assert client.get("/redoc").status_code == 404
+    assert client.get("/openapi.json").status_code == 404
+
+
 def test_home_renders_phase_eight_guidance_and_interface_states(
     web_client: tuple[TestClient, StubMonitor],
 ) -> None:
