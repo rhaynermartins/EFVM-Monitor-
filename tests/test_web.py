@@ -182,6 +182,12 @@ def test_phase_eight_assets_support_date_containment_and_history_navigation(
     assert "min-inline-size: 0" in stylesheet.text
     assert "max-inline-size: 100%" in stylesheet.text
     assert "-webkit-min-logical-width: 0" in stylesheet.text
+    assert "padding-inline: 0" in stylesheet.text
+    assert '.field input[type="date"]::-webkit-date-and-time-value' in stylesheet.text
+    assert '.field input[type="date"]::-webkit-datetime-edit' in stylesheet.text
+    assert '.field input[type="date"]::-webkit-calendar-picker-indicator' in stylesheet.text
+    assert "padding-inline-start: 13px" in stylesheet.text
+    assert "margin-inline-end: 13px" in stylesheet.text
 
 
 def test_catalog_returns_stations_and_classes(web_client: tuple[TestClient, StubMonitor]) -> None:
