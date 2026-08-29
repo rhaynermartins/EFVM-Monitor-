@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the EFVM Monitor SQLite backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 America/Sao_Paulo
+Persistent=true
+RandomizedDelaySec=10m
+Unit=efvm-monitor-backup.service
+
+[Install]
+WantedBy=timers.target
