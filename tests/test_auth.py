@@ -84,7 +84,7 @@ def test_registers_with_http_only_cookie_and_persists_session(
     assert verify_password(ACCOUNT["password"], saved_user.password_hash) is True
 
 
-def test_dashboard_uses_authenticated_name_in_header_and_greeting(
+def test_dashboard_uses_authenticated_greeting_only_in_header(
     authenticated_app: tuple[TestClient, MonitoringRepository],
 ) -> None:
     client, _ = authenticated_app
@@ -99,14 +99,17 @@ def test_dashboard_uses_authenticated_name_in_header_and_greeting(
     )
 
     response = client.get("/")
+    header, page_body = response.text.split("</header>", maxsplit=1)
 
     assert response.status_code == 200
-    assert 'class="brand-icon"' in response.text
-    assert "<strong>EFVM</strong>" in response.text
-    assert 'class="account-name"' in response.text
-    assert 'id="logout-button"' in response.text
-    assert "Olá," in response.text
-    assert response.text.count(long_name) >= 2
+    assert 'class="brand-icon"' in header
+    assert "<strong>EFVM</strong>" in header
+    assert 'class="account-name"' in header
+    assert 'id="logout-button"' in header
+    assert f"Olá, {long_name}." in header
+    assert f"Olá, {long_name}." not in page_body
+    assert 'class="user-greeting"' not in response.text
+    assert response.text.count(long_name) == 2
     assert "nome-longo@example.com" not in response.text
 
 
