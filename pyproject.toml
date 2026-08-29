@@ -33,6 +33,9 @@ efvm-monitor-web = "efvm_monitor.web:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/efvm_monitor"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"src/efvm_monitor/certificates/digicert-global-g2-tls-rsa-sha256-2020-ca1.pem" = "efvm_monitor/certificates/digicert-global-g2-tls-rsa-sha256-2020-ca1.pem"
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
