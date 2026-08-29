@@ -33,8 +33,11 @@
         {% if authentication_enabled %}
           <div class="header-actions">
             <div class="account-summary">
-              <strong class="account-name" title="{{ authenticated_user.name }}">
-                {{ authenticated_user.name }}
+              <strong
+                class="account-name"
+                title="Olá, {{ authenticated_user.name }}."
+              >
+                Olá, {{ authenticated_user.name }}.
               </strong>
               <button id="logout-button" class="text-button" type="button">Sair</button>
             </div>
@@ -44,9 +47,6 @@
     </header>
 
     <main class="page-shell">
-      {% if authentication_enabled %}
-        <p class="user-greeting">Olá, <strong>{{ authenticated_user.name }}</strong>.</p>
-      {% endif %}
       <section class="intro" aria-labelledby="page-title">
         <p class="eyebrow">Seu monitor de passagens</p>
         <h1 id="page-title">Encontre a passagem. A compra continua sendo sua.</h1>
@@ -316,7 +316,7 @@
             </dl>
           </div>
 
-          <section class="history-section" aria-labelledby="history-title">
+          <section id="monitor-history" class="history-section" aria-labelledby="history-title">
             <div class="history-heading">
               <div>
                 <p class="step-label">Últimas verificações</p>
