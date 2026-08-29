@@ -379,17 +379,44 @@ class NotificationService:
             try:
                 self._web_push.notify(settings, result, monitoring_id, detected_at)
             except Exception as exc:
-                LOGGER.exception("O alerta Web Push não pôde ser processado: %s", exc)
+                LOGGER.exception(
+                    "O alerta Web Push não pôde ser processado: %s",
+                    exc,
+                    extra={
+                        "event": "notification_channel_failed",
+                        "monitoring_id": monitoring_id,
+                        "result": result.status.value,
+                        "channel": "WEB_PUSH",
+                    },
+                )
         if settings.sms_enabled and self.sms_config.enabled:
             try:
                 self._notify_sms(settings, result, monitoring_id, detected_at)
             except Exception as exc:
-                LOGGER.exception("O alerta SMS não pôde ser processado: %s", exc)
+                LOGGER.exception(
+                    "O alerta SMS não pôde ser processado: %s",
+                    exc,
+                    extra={
+                        "event": "notification_channel_failed",
+                        "monitoring_id": monitoring_id,
+                        "result": result.status.value,
+                        "channel": SMS_CHANNEL,
+                    },
+                )
         if settings.whatsapp_enabled:
             try:
                 self._notify_whatsapp(settings, result, monitoring_id, detected_at)
             except Exception as exc:
-                LOGGER.exception("O alerta do WhatsApp não pôde ser processado: %s", exc)
+                LOGGER.exception(
+                    "O alerta do WhatsApp não pôde ser processado: %s",
+                    exc,
+                    extra={
+                        "event": "notification_channel_failed",
+                        "monitoring_id": monitoring_id,
+                        "result": result.status.value,
+                        "channel": WHATSAPP_CHANNEL,
+                    },
+                )
         try:
             send_availability_alert(settings, result)
         except httpx.HTTPError as exc:
@@ -455,7 +482,16 @@ class NotificationService:
                     attempt_count=attempts,
                     error_message=str(exc),
                 )
-            LOGGER.error("SMS não enviado: %s", exc)
+            LOGGER.error(
+                "SMS não enviado: %s",
+                exc,
+                extra={
+                    "event": "notification_delivery_failed",
+                    "monitoring_id": monitoring_id,
+                    "channel": SMS_CHANNEL,
+                    "attempts": attempts,
+                },
+            )
             return
         if self._repository is not None and delivery_id is not None:
             self._repository.complete_notification(
@@ -464,7 +500,16 @@ class NotificationService:
                 attempt_count=sent.attempts,
                 external_message_id=sent.external_message_id,
             )
-        LOGGER.info("SMS processado pelo provider %s.", self.sms_config.provider)
+        LOGGER.info(
+            "SMS processado pelo provider %s.",
+            self.sms_config.provider,
+            extra={
+                "event": "notification_delivery_sent",
+                "monitoring_id": monitoring_id,
+                "channel": SMS_CHANNEL,
+                "attempts": sent.attempts,
+            },
+        )
 
     def _notify_whatsapp(
         self,
@@ -500,7 +545,16 @@ class NotificationService:
                     attempt_count=attempts,
                     error_message=str(exc),
                 )
-            LOGGER.error("Alerta do WhatsApp não enviado: %s", exc)
+            LOGGER.error(
+                "Alerta do WhatsApp não enviado: %s",
+                exc,
+                extra={
+                    "event": "notification_delivery_failed",
+                    "monitoring_id": monitoring_id,
+                    "channel": WHATSAPP_CHANNEL,
+                    "attempts": attempts,
+                },
+            )
             return
 
         if self._repository is not None and delivery_id is not None:
@@ -510,7 +564,15 @@ class NotificationService:
                 attempt_count=send_result.attempts,
                 external_message_id=send_result.external_message_id,
             )
-        LOGGER.info("Alerta enviado pelo WhatsApp Cloud API.")
+        LOGGER.info(
+            "Alerta enviado pelo WhatsApp Cloud API.",
+            extra={
+                "event": "notification_delivery_sent",
+                "monitoring_id": monitoring_id,
+                "channel": WHATSAPP_CHANNEL,
+                "attempts": send_result.attempts,
+            },
+        )
 
 
 def format_whatsapp_message(settings: Settings, detected_at: str) -> str:
