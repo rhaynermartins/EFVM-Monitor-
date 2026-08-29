@@ -32,7 +32,11 @@ from efvm_monitor.checker import EFVMClient, PortalError
 from efvm_monitor.cli import _configure_logging
 from efvm_monitor.config import ConfigurationError, Settings
 from efvm_monitor.database import LEGACY_USER_ID, MonitoringRepository, PersistedMonitor
-from efvm_monitor.manager import MonitoringManager, MonitoringNotFound
+from efvm_monitor.manager import (
+    MonitoringLimitReached,
+    MonitoringManager,
+    MonitoringNotFound,
+)
 from efvm_monitor.monitor import MonitorAlreadyRunning, MonitorService, MonitorSnapshot
 from efvm_monitor.notifier import NotificationService
 from efvm_monitor.web_push import WebPushConfigurationError, WebPushSendError
@@ -44,6 +48,24 @@ SESSION_COOKIE = "efvm_session"
 OFFICIAL_PORTAL_URL = (
     "https://tremdepassageiros.vale.com/sgpweb/portal/index.html#/home"
 )
+
+
+def _bounded_environment_integer(
+    name: str,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    raw_value = os.getenv(name, str(default)).strip()
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ConfigurationError(f"{name} deve ser um número inteiro.") from exc
+    if not minimum <= value <= maximum:
+        raise ConfigurationError(
+            f"{name} deve ficar entre {minimum} e {maximum}."
+        )
+    return value
 
 
 class MonitoringRequest(BaseModel):
@@ -191,6 +213,12 @@ def create_app(
         manager_service = MonitoringManager(
             storage,
             notifier=notifications.notify,
+            max_monitors_per_user=_bounded_environment_integer(
+                "EFVM_MAX_MONITORS_PER_USER",
+                10,
+                1,
+                100,
+            ),
         )
     provide_catalog = catalog_provider or CatalogCache().get
 
@@ -299,13 +327,38 @@ def create_app(
     )
 
     @application.get("/healthz", include_in_schema=False)
-    def healthcheck() -> JSONResponse:
+    def healthcheck(details: bool = Query(default=False)) -> JSONResponse:
         if storage is None or not storage.is_available():
             return JSONResponse(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 content={"status": "degraded", "database": "unavailable"},
             )
-        return JSONResponse({"status": "ok", "database": "ok"})
+        if manager_service is not None:
+            manager_status = manager_service.operational_status()
+        else:
+            legacy_snapshot = (
+                monitor_service.snapshot() if monitor_service is not None else MonitorSnapshot()
+            )
+            manager_status = {
+                "status": "ok",
+                "active_monitors": int(legacy_snapshot.running),
+                "registered_workers": int(monitor_service is not None),
+                "running_workers": int(legacy_snapshot.running),
+                "stalled_workers": 0,
+                "orphaned_workers": 0,
+            }
+        response_status = (
+            status.HTTP_200_OK
+            if manager_status["status"] == "ok"
+            else status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+        content: dict[str, Any] = {
+            "status": manager_status["status"],
+            "database": "ok",
+        }
+        if details or response_status != status.HTTP_200_OK:
+            content["manager"] = manager_status
+        return JSONResponse(status_code=response_status, content=content)
 
     @application.get("/login", response_class=HTMLResponse)
     def login_page(request: Request) -> HTMLResponse:
@@ -598,6 +651,11 @@ def create_app(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         except MonitorAlreadyRunning as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        except MonitoringLimitReached as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
 
     @application.get("/api/monitoramento")
     def monitoring_status(request: Request) -> dict[str, Any]:
