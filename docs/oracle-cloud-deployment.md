@@ -67,7 +67,48 @@ Resposta saudável:
 {"status":"ok","database":"ok"}
 ```
 
-Uma indisponibilidade do banco produz HTTP `503` e estado `degraded`.
+Para diagnóstico operacional, solicite os detalhes do manager:
+
+```bash
+curl --fail 'https://efvm-monitor-rhayner.duckdns.org/healthz?details=true'
+```
+
+O bloco `manager` compara monitores ativos no SQLite com workers registrados e vivos. Ele informa
+`active_monitors`, `registered_workers`, `running_workers`, `stalled_workers` e
+`orphaned_workers`. Banco indisponível, worker ausente ou worker sem monitor ativo produzem HTTP
+`503` e estado `degraded`. O endpoint não expõe usuário, trajeto, histórico ou credenciais.
+
+## Logs estruturados
+
+O unit systemd define `EFVM_LOG_FORMAT=json`. Cada linha da aplicação contém timestamp, nível,
+logger e mensagem, além de campos operacionais conhecidos quando aplicáveis:
+
+- `event`;
+- `monitoring_id`;
+- `user_id` interno;
+- `result`;
+- `duration_ms`;
+- `channel`, `attempts` e `status_code`.
+
+O formatador não serializa o ambiente do processo nem campos arbitrários. Senhas, cookies,
+tokens, chaves VAPID privadas e credenciais de providers nunca devem ser adicionados às
+mensagens. Para filtrar eventos recentes:
+
+```bash
+sudo journalctl -u efvm-monitor.service --since "30 minutes ago" -o cat --no-pager
+```
+
+## Recuperação e limites defensivos
+
+Uma falha inesperada de cliente, rede ou persistência é registrada como `ERRO`; o worker espera o
+intervalo configurado, recria o cliente e tenta novamente. A falha de um monitor continua isolada
+dos demais. O healthcheck detalhado permite detectar divergências que não se recuperaram.
+
+Por padrão, cada usuário pode manter até 10 monitoramentos visíveis. Remover logicamente um
+monitor libera espaço. O valor pode ser ajustado entre 1 e 100 por
+`EFVM_MAX_MONITORS_PER_USER`, sem reduzir o intervalo mínimo de consulta de 60 segundos.
+Tentativas de login, criação repetitiva e testes de Web Push também usam janelas temporárias em
+memória. Respostas limitadas usam HTTP `429` e `Retry-After`; nenhum bloqueio é permanente.
 
 ## Atualização da aplicação
 
@@ -95,6 +136,28 @@ sudo systemctl status efvm-monitor-backup.service
 Antes de qualquer recuperação, pare e confirme o arquivo, a integridade e a data desejada. A
 substituição do banco é uma operação manual potencialmente destrutiva e não deve ser executada
 automaticamente.
+
+O timer local protege contra falhas lógicas e alterações acidentais, mas não contra perda total do
+disco da VM. Pelo menos semanalmente, copie o backup íntegro mais recente para um armazenamento
+externo privado e criptografado sob controle do operador. Não envie bancos para o GitHub e não
+use links públicos. Confirme a cópia recebida com `PRAGMA integrity_check` sem substituir o banco
+em produção.
+
+Uma simulação de recuperação deve ser feita somente em arquivo temporário e fora do caminho de
+produção. A recuperação real exige checkpoint manual, serviço parado, backup adicional do banco
+atual e confirmação explícita do arquivo escolhido. O projeto não executa restauração automática.
+
+## Checklist operacional
+
+Após deploy ou reinicialização:
+
+1. confirme `efvm-monitor.service`, `caddy.service` e o timer de backup como ativos;
+2. consulte `/healthz?details=true` e verifique `stalled_workers=0`;
+3. confirme exatamente um processo Uvicorn com `--workers 1`;
+4. execute `PRAGMA quick_check` no SQLite;
+5. confira espaço em disco, RAM e swap;
+6. revise logs por `monitor_worker_recovering`, `rate_limit_exceeded` e falhas de notificação;
+7. confirme que a quantidade de subscriptions e monitoramentos não mudou inesperadamente.
 
 ## Rede e DNS
 
