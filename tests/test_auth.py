@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+import efvm_monitor.web as web_module
 from efvm_monitor.auth import hash_password, verify_password
 from efvm_monitor.database import MonitoringRepository
 from efvm_monitor.manager import MonitoringManager
@@ -157,6 +158,26 @@ def test_logs_in_again_with_persisted_credentials(
     assert rejected.status_code == 401
     assert accepted.status_code == 200
     assert client.get("/").status_code == 200
+
+
+def test_limits_repeated_login_attempts_without_logging_credentials(
+    authenticated_app: tuple[TestClient, MonitoringRepository],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _ = authenticated_app
+    session = register(client)
+    client.post(
+        "/api/auth/logout",
+        headers={"X-CSRF-Token": session["csrf_token"]},
+    )
+    monkeypatch.setattr(web_module, "verify_password", lambda *_: False)
+    payload = {"email": ACCOUNT["email"], "password": "tentativa-invalida"}
+
+    attempts = [client.post("/api/auth/login", json=payload) for _ in range(11)]
+
+    assert [response.status_code for response in attempts[:10]] == [401] * 10
+    assert attempts[10].status_code == 429
+    assert int(attempts[10].headers["retry-after"]) > 0
 
 
 def test_session_survives_application_restart(tmp_path: Path) -> None:
