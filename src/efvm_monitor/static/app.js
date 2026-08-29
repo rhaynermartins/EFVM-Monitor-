@@ -146,6 +146,12 @@ function setFormError(message = "") {
   elements.formError.hidden = !message;
 }
 
+function userFacingError(error, fallback) {
+  if (!navigator.onLine) return "Você está sem internet. Tente novamente quando a conexão voltar.";
+  if (error instanceof TypeError) return fallback;
+  return error.message || fallback;
+}
+
 function option(value, label) {
   const item = document.createElement("option");
   item.value = String(value);
@@ -573,7 +579,7 @@ function updateDeviceSummary() {
 
 function updateOnboarding() {
   const hasMonitor = currentMonitors.length > 0;
-  const installationComplete = appInstalled || isStandalone();
+  const installationComplete = appInstalled || isStandalone() || (!isIos() && !isAndroid());
   setOnboardingStep(elements.onboardingMonitor, hasMonitor, "2");
   setOnboardingStep(elements.onboardingInstall, installationComplete, "3");
   setOnboardingStep(elements.onboardingPush, pushSubscribed, "4");
@@ -631,6 +637,7 @@ function pushSubscriptionPayload(subscription) {
 function renderPushStatus(message, state = "idle") {
   elements.pushStatus.textContent = message;
   elements.pushStatus.dataset.state = state;
+  elements.pushStatus.closest(".push-option").dataset.state = state;
   pushLifecycleState = state;
   updateOnboarding();
 }
@@ -791,7 +798,8 @@ async function startMonitoring(event) {
       block: "start",
     });
   } catch (error) {
-    setFormError(error.message);
+    console.error("Não foi possível adicionar o monitoramento.", error);
+    setFormError(userFacingError(error, "Não foi possível adicionar esta viagem agora. Tente novamente."));
     setControls(false);
   } finally {
     elements.startButton.textContent = "Adicionar monitoramento";
@@ -804,7 +812,8 @@ async function stopMonitoring() {
     elements.stopButton.disabled = true;
     renderState(await fetchJson("/api/monitoramento", { method: "DELETE" }));
   } catch (error) {
-    setFormError(error.message);
+    console.error("Não foi possível pausar o monitoramento.", error);
+    setFormError(userFacingError(error, "Não foi possível pausar esta viagem agora."));
   }
 }
 
@@ -814,7 +823,8 @@ async function pauseMonitor(monitoringId) {
     await fetchJson(`/api/monitoramentos/${monitoringId}/pausar`, { method: "POST" });
     await refreshState();
   } catch (error) {
-    setFormError(error.message);
+    console.error("Não foi possível pausar o monitoramento.", error);
+    setFormError(userFacingError(error, "Não foi possível pausar esta viagem agora."));
   }
 }
 
@@ -825,7 +835,8 @@ async function resumeMonitor(monitoringId) {
     selectedMonitorId = monitoringId;
     await refreshState();
   } catch (error) {
-    setFormError(error.message);
+    console.error("Não foi possível retomar o monitoramento.", error);
+    setFormError(userFacingError(error, "Não foi possível retomar esta viagem agora."));
   }
 }
 
@@ -840,7 +851,8 @@ async function removeMonitor(monitoringId) {
     if (selectedMonitorId === monitoringId) selectedMonitorId = null;
     await refreshState();
   } catch (error) {
-    setFormError(error.message);
+    console.error("Não foi possível remover o monitoramento.", error);
+    setFormError(userFacingError(error, "Não foi possível remover esta viagem agora."));
   }
 }
 
