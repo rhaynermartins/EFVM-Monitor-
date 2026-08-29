@@ -4,7 +4,7 @@ Prova de conceito em Python para consultar a disponibilidade de passagens do Tre
 Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O projeto
 **não compra passagem** e não acessa login da Vale, CPF, reserva, assento ou pagamento.
 
-## Escopo atual — Fases 1 a 6
+## Escopo atual — Fases 1 a 7
 
 - configurar origem, destino, data, classe e quantidade de passageiros em `.env`;
 - consultar somente interfaces públicas usadas antes do fluxo de compra;
@@ -29,6 +29,9 @@ Passageiros da Estrada de Ferro Vitória a Minas (EFVM) e emitir um alerta. O pr
 - separar monitoramentos, histórico e dispositivos Web Push por usuário;
 - bloquear acesso horizontal a IDs pertencentes a outras contas;
 - proteger operações de escrita contra CSRF.
+- executar continuamente em uma VM Oracle Cloud Always Free com SQLite persistente;
+- publicar a aplicação atrás do Caddy em uma URL HTTPS, sem expor a porta do Uvicorn;
+- iniciar aplicação, proxy HTTPS e backup automaticamente após reinicialização da VM.
 
 Não fazem parte deste MVP: login na conta da Vale, escolha ou bloqueio de assento, reserva,
 pagamento, compra, solução de CAPTCHA e qualquer tentativa de contornar bloqueios ou mecanismos
@@ -144,8 +147,29 @@ porta, altere `EFVM_WEB_PORT` no `.env`.
 
 Em desktop, `localhost`/`127.0.0.1` é aceito pelos navegadores como contexto seguro de
 desenvolvimento. Para instalar e testar em um telefone físico, o aparelho precisa acessar o
-servidor por uma URL HTTPS válida. A publicação contínua e sua configuração de HTTPS ficam
-fora desta fase; não exponha o servidor de desenvolvimento diretamente na internet.
+servidor por uma URL HTTPS válida. Não exponha o servidor de desenvolvimento diretamente na
+internet.
+
+## Produção — Fase 7
+
+A implantação atual está disponível em
+[https://efvm-monitor-rhayner.duckdns.org](https://efvm-monitor-rhayner.duckdns.org). O Caddy
+encerra TLS e encaminha as requisições para uma única instância Uvicorn em
+`127.0.0.1:8000`. O cookie de sessão usa `Secure`, `HttpOnly` e `SameSite=Lax`.
+
+O endpoint abaixo permite verificar a aplicação e a abertura do SQLite sem autenticação:
+
+```bash
+curl --fail https://efvm-monitor-rhayner.duckdns.org/healthz
+```
+
+Banco e backups ficam fora do checkout Git. O serviço da aplicação, o Caddy e o timer diário de
+backup iniciam automaticamente com a VM. A configuração operacional completa está em
+[docs/oracle-cloud-deployment.md](docs/oracle-cloud-deployment.md).
+
+O IPv4 da instância é efêmero. Depois de uma parada seguida de inicialização, confirme o novo
+endereço no Console Oracle e atualize o DuckDNS antes de considerar o serviço recuperado. Tokens
+DuckDNS, chaves VAPID, `.env`, SQLite e logs locais nunca devem ser enviados ao GitHub.
 
 O estado é persistido no caminho definido por `EFVM_DATABASE_PATH`, cujo padrão é
 `data/efvm-monitor.db`. Ao reiniciar o servidor, todos os monitores são recuperados. Cada um
@@ -389,6 +413,7 @@ do formulário. Eles não fazem chamadas ao portal nem enviam mensagens reais.
 
 | Método | Rota | Função |
 | --- | --- | --- |
+| `GET` | `/healthz` | Verifica aplicação e disponibilidade do SQLite |
 | `GET` | `/` | Exibe a interface |
 | `GET` | `/api/catalogo` | Lista estações, classes e janela de venda |
 | `POST` | `/api/monitoramento` | Inicia um monitoramento |
