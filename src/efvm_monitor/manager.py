@@ -24,6 +24,10 @@ class MonitoringNotFound(LookupError):
     """Indica que o ID não pertence a um monitoramento visível."""
 
 
+class MonitoringLimitReached(RuntimeError):
+    """Indica que o usuário atingiu o limite defensivo de monitoramentos."""
+
+
 class MonitoringManager:
     """Mantém um executor isolado por ID e compartilha apenas a persistência."""
 
@@ -33,10 +37,14 @@ class MonitoringManager:
         *,
         client_factory: Callable[[Settings], EFVMClient] = EFVMClient,
         notifier: Callable[[Settings, Any, int | None, str], None] | None = None,
+        max_monitors_per_user: int = 10,
     ) -> None:
+        if max_monitors_per_user < 1:
+            raise ValueError("O limite de monitoramentos deve ser positivo.")
         self.repository = repository
         self._client_factory = client_factory
         self._notifier = notifier
+        self._max_monitors_per_user = max_monitors_per_user
         self._services: dict[int, MonitorService] = {}
         self._lock = threading.RLock()
 
@@ -45,13 +53,26 @@ class MonitoringManager:
         settings: Settings,
         user_id: int = LEGACY_USER_ID,
     ) -> MonitorSnapshot:
-        service = self._new_service()
-        snapshot = service.start(settings, user_id=user_id)
-        if snapshot.monitoring_id is None:
-            service.shutdown()
-            raise RuntimeError("O monitoramento não recebeu um ID persistente.")
         with self._lock:
+            monitor_count = len(self.repository.list_monitors(user_id=user_id))
+            if monitor_count >= self._max_monitors_per_user:
+                raise MonitoringLimitReached(
+                    f"O limite de {self._max_monitors_per_user} monitoramentos foi atingido."
+                )
+            service = self._new_service()
+            snapshot = service.start(settings, user_id=user_id)
+            if snapshot.monitoring_id is None:
+                service.shutdown()
+                raise RuntimeError("O monitoramento não recebeu um ID persistente.")
             self._services[snapshot.monitoring_id] = service
+        LOGGER.info(
+            "Monitoramento criado.",
+            extra={
+                "event": "monitor_created",
+                "monitoring_id": snapshot.monitoring_id,
+                "user_id": user_id,
+            },
+        )
         return snapshot
 
     def list(self, user_id: int = LEGACY_USER_ID) -> list[MonitorSnapshot]:
@@ -146,7 +167,15 @@ class MonitoringManager:
                     self.resume(monitor.id, settings, user_id=monitor.user_id)
                 )
             except Exception as exc:
-                LOGGER.error("Monitor %s não pôde ser retomado: %s", monitor.id, exc)
+                LOGGER.error(
+                    "Monitoramento não pôde ser retomado: %s",
+                    exc,
+                    extra={
+                        "event": "monitor_restore_failed",
+                        "monitoring_id": monitor.id,
+                        "user_id": monitor.user_id,
+                    },
+                )
                 self.repository.set_status(monitor.id, MonitorStatus.PAUSED)
                 recovered = self.repository.get_monitor(
                     monitor.id,
@@ -155,6 +184,30 @@ class MonitoringManager:
                 if recovered is not None:
                     restored.append(self._snapshot_from_monitor(recovered, message=str(exc)))
         return restored
+
+    def operational_status(self) -> dict[str, Any]:
+        """Resume a correspondência entre monitores ativos e workers vivos."""
+        active_ids = {
+            monitor.id for monitor in self.repository.list_all_monitors() if monitor.active
+        }
+        with self._lock:
+            registered_workers = len(self._services)
+            running_ids = {
+                monitoring_id
+                for monitoring_id, service in self._services.items()
+                if service.snapshot().running
+            }
+        stalled_ids = sorted(active_ids - running_ids)
+        orphaned_ids = sorted(running_ids - active_ids)
+        healthy = not stalled_ids and not orphaned_ids
+        return {
+            "status": "ok" if healthy else "degraded",
+            "active_monitors": len(active_ids),
+            "registered_workers": registered_workers,
+            "running_workers": len(running_ids),
+            "stalled_workers": len(stalled_ids),
+            "orphaned_workers": len(orphaned_ids),
+        }
 
     def shutdown(self) -> None:
         with self._lock:
