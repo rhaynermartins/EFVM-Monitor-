@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from efvm_monitor.manager import (
     MonitoringManager,
     MonitoringNotFound,
 )
+from efvm_monitor.monitor import MonitorAlreadyRunning, MonitorSnapshot
 
 
 class RouteClient:
@@ -188,3 +190,46 @@ def test_operational_status_detects_active_monitor_without_worker(tmp_path: Path
         "stalled_workers": 1,
         "orphaned_workers": 0,
     }
+
+
+def test_concurrent_resume_starts_only_one_worker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _ = manager(tmp_path)
+    created = service.create(settings("origem-a", "destino-a"))
+    assert created.monitoring_id is not None
+    service.pause(created.monitoring_id)
+
+    class SlowService:
+        def __init__(self) -> None:
+            self.state = MonitorSnapshot()
+
+        def start(self, _settings: Settings, monitoring_id: int, user_id: int) -> MonitorSnapshot:
+            time.sleep(0.05)
+            self.state = MonitorSnapshot(monitoring_id=monitoring_id, running=True)
+            return self.state
+
+        def snapshot(self) -> MonitorSnapshot:
+            return self.state
+
+        def shutdown(self) -> None:
+            return None
+
+    monkeypatch.setattr(service, "_new_service", SlowService)
+
+    def resume_once() -> str:
+        try:
+            service.resume(
+                created.monitoring_id,
+                settings("origem-a", "destino-a"),
+            )
+        except MonitorAlreadyRunning:
+            return "blocked"
+        return "started"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(executor.map(lambda _: resume_once(), range(2)))
+
+    assert sorted(outcomes) == ["blocked", "started"]
+    service.shutdown()
