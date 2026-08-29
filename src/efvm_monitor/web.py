@@ -25,6 +25,7 @@ from efvm_monitor.auth import (
     AuthenticationError,
     hash_password,
     new_session_credentials,
+    normalize_email,
     secure_token_matches,
     verify_password,
 )
@@ -39,6 +40,7 @@ from efvm_monitor.manager import (
 )
 from efvm_monitor.monitor import MonitorAlreadyRunning, MonitorService, MonitorSnapshot
 from efvm_monitor.notifier import NotificationService
+from efvm_monitor.rate_limit import RateLimitExceeded, SlidingWindowRateLimiter
 from efvm_monitor.web_push import WebPushConfigurationError, WebPushSendError
 
 LOGGER = logging.getLogger(__name__)
@@ -48,6 +50,12 @@ SESSION_COOKIE = "efvm_session"
 OFFICIAL_PORTAL_URL = (
     "https://tremdepassageiros.vale.com/sgpweb/portal/index.html#/home"
 )
+LOGIN_ATTEMPT_LIMIT = 10
+LOGIN_WINDOW_SECONDS = 5 * 60
+MONITOR_CREATION_LIMIT = 10
+MONITOR_CREATION_WINDOW_SECONDS = 60
+PUSH_TEST_LIMIT = 3
+PUSH_TEST_WINDOW_SECONDS = 60
 
 
 def _bounded_environment_integer(
@@ -205,6 +213,7 @@ def create_app(
             os.getenv("EFVM_DATABASE_PATH", "data/efvm-monitor.db")
         )
     notifications = notification_service or NotificationService(repository=storage)
+    rate_limiter = SlidingWindowRateLimiter()
     manager_service = manager
     monitor_service = monitor
     if manager_service is None and monitor_service is None:
@@ -283,6 +292,31 @@ def create_app(
                 detail="Sua sessão expirou. Entre novamente.",
             )
         return session
+
+    def enforce_rate_limit(
+        key: str,
+        *,
+        limit: int,
+        window_seconds: int,
+        operation: str,
+        user_id: int | None = None,
+    ) -> None:
+        try:
+            rate_limiter.consume(key, limit=limit, window_seconds=window_seconds)
+        except RateLimitExceeded as exc:
+            LOGGER.warning(
+                "Limite defensivo atingido.",
+                extra={
+                    "event": "rate_limit_exceeded",
+                    "user_id": user_id,
+                    "result": operation,
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=str(exc),
+                headers={"Retry-After": str(exc.retry_after_seconds)},
+            ) from exc
 
     public_paths = {
         "/healthz",
@@ -429,6 +463,17 @@ def create_app(
         if storage is None:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
         try:
+            login_identity = normalize_email(payload.email)
+        except AuthenticationError:
+            login_identity = payload.email.strip().casefold()
+        login_limit_key = f"login:{login_identity}"
+        enforce_rate_limit(
+            login_limit_key,
+            limit=LOGIN_ATTEMPT_LIMIT,
+            window_seconds=LOGIN_WINDOW_SECONDS,
+            operation="login",
+        )
+        try:
             user = storage.get_user_by_email(payload.email)
         except AuthenticationError:
             user = None
@@ -447,6 +492,7 @@ def create_app(
             )
         credentials = new_session_credentials()
         storage.create_session(user.id, credentials)
+        rate_limiter.reset(login_limit_key)
         return authenticated_response(user.id, credentials.token)
 
     @application.get("/api/auth/me")
@@ -581,6 +627,13 @@ def create_app(
     @application.post("/api/push/test")
     def test_push(payload: PushDeviceRequest, request: Request) -> dict[str, Any]:
         session = request_session(request)
+        enforce_rate_limit(
+            f"push-test:{session.user_id}",
+            limit=PUSH_TEST_LIMIT,
+            window_seconds=PUSH_TEST_WINDOW_SECONDS,
+            operation="push_test",
+            user_id=session.user_id,
+        )
         try:
             attempts = notifications.send_test_web_push(
                 payload.device_id,
@@ -612,6 +665,13 @@ def create_app(
         payload: MonitoringRequest,
         session: AuthenticatedSession,
     ) -> dict[str, Any]:
+        enforce_rate_limit(
+            f"monitor-create:{session.user_id}",
+            limit=MONITOR_CREATION_LIMIT,
+            window_seconds=MONITOR_CREATION_WINDOW_SECONDS,
+            operation="monitor_create",
+            user_id=session.user_id,
+        )
         try:
             if authentication_enabled and (payload.sms_enabled or payload.whatsapp_enabled):
                 raise ConfigurationError(
