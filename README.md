@@ -187,6 +187,10 @@ O endpoint abaixo permite verificar a aplicação e a abertura do SQLite sem aut
 curl --fail https://efvm-monitor-rhayner.duckdns.org/healthz
 ```
 
+Use `GET /healthz?details=true` para comparar monitores ativos com workers vivos. Uma
+divergência ou indisponibilidade do SQLite retorna HTTP `503`; a resposta detalhada contém
+somente contagens operacionais, sem dados de usuários ou viagens.
+
 Banco e backups ficam fora do checkout Git. O serviço da aplicação, o Caddy e o timer diário de
 backup iniciam automaticamente com a VM. A configuração operacional completa está em
 [docs/oracle-cloud-deployment.md](docs/oracle-cloud-deployment.md).
@@ -198,6 +202,24 @@ DuckDNS, chaves VAPID, `.env`, SQLite e logs locais nunca devem ser enviados ao 
 O estado é persistido no caminho definido por `EFVM_DATABASE_PATH`, cujo padrão é
 `data/efvm-monitor.db`. Ao reiniciar o servidor, todos os monitores são recuperados. Cada um
 que estava ativo recebe novamente seu executor independente; os pausados permanecem parados.
+
+## Robustez e operação — Fase 9
+
+Cada worker registra resultado e duração da consulta e é recriado após falhas inesperadas de
+cliente, rede ou persistência. Um monitor com falha não interrompe os demais. Em produção, os
+logs usam JSON e aceitam apenas campos operacionais conhecidos; secrets, cookies e o ambiente do
+processo não são serializados.
+
+O limite padrão é de 10 monitoramentos visíveis por usuário, configurável por
+`EFVM_MAX_MONITORS_PER_USER` entre 1 e 100. O intervalo mínimo continua em 60 segundos.
+Tentativas repetidas de login, criação e teste de Web Push recebem HTTP `429` com `Retry-After`
+quando ultrapassam janelas temporárias em memória.
+
+O backup SQLite diário conserva 14 dias localmente. Para também cobrir perda total do disco, o
+operador deve guardar periodicamente uma cópia íntegra em armazenamento privado e criptografado.
+Restaurações permanecem manuais e exigem checkpoint; a aplicação nunca substitui o banco
+automaticamente. Veja o checklist em
+[docs/oracle-cloud-deployment.md](docs/oracle-cloud-deployment.md).
 
 ## Persistência local
 
@@ -431,14 +453,15 @@ Os testes locais verificam a classificação dos três estados, migrations idemp
 persistência, histórico, retomada após reinicialização, deduplicação de alertas, retry,
 continuidade após falha de notificação, subscriptions Web Push, invalidação `404`/`410`,
 proteção da chave VAPID privada, service worker, serviço em segundo plano, rotas e validações
-do formulário, onboarding e estados mobile da Fase 8. Eles não fazem chamadas ao portal nem
-enviam mensagens reais.
+do formulário, onboarding, estados mobile da Fase 8, recuperação de worker, health operacional,
+limites por usuário e rate limiting. Eles não fazem chamadas ao portal nem enviam mensagens
+reais.
 
 ## Rotas locais
 
 | Método | Rota | Função |
 | --- | --- | --- |
-| `GET` | `/healthz` | Verifica aplicação e disponibilidade do SQLite |
+| `GET` | `/healthz` | Verifica SQLite e correspondência entre monitores e workers |
 | `GET` | `/` | Exibe a interface |
 | `GET` | `/api/catalogo` | Lista estações, classes e janela de venda |
 | `POST` | `/api/monitoramento` | Inicia um monitoramento |
