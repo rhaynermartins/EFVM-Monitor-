@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -211,32 +212,82 @@ class MonitorService:
         previous_status: AvailabilityStatus | None,
     ) -> None:
         try:
-            with self._client_factory(settings) as client:
-                while not stop_event.is_set():
-                    result = client.check()
-                    checked_at = self._set_result(result.status, result.message, monitoring_id)
-                    became_available = (
-                        result.status is AvailabilityStatus.TEM_VAGA
-                        and previous_status is not result.status
-                    )
-                    if became_available:
-                        try:
-                            self._notifier(settings, result, monitoring_id, checked_at)
-                        except Exception as exc:
-                            LOGGER.exception(
-                                "O alerta não foi processado; o monitor continuará: %s",
-                                exc,
+            while not stop_event.is_set():
+                try:
+                    with self._client_factory(settings) as client:
+                        while not stop_event.is_set():
+                            started_at = time.monotonic()
+                            result = client.check()
+                            checked_at = self._set_result(
+                                result.status,
+                                result.message,
+                                monitoring_id,
                             )
-                    previous_status = result.status
+                            LOGGER.info(
+                                "Consulta de disponibilidade concluída.",
+                                extra={
+                                    "event": "availability_check_completed",
+                                    "monitoring_id": monitoring_id,
+                                    "user_id": self._user_id,
+                                    "result": result.status.value,
+                                    "duration_ms": round(
+                                        (time.monotonic() - started_at) * 1_000,
+                                        2,
+                                    ),
+                                },
+                            )
+                            became_available = (
+                                result.status is AvailabilityStatus.TEM_VAGA
+                                and previous_status is not result.status
+                            )
+                            if became_available:
+                                try:
+                                    self._notifier(
+                                        settings,
+                                        result,
+                                        monitoring_id,
+                                        checked_at,
+                                    )
+                                except Exception as exc:
+                                    LOGGER.exception(
+                                        "O alerta não foi processado; o monitor continuará: %s",
+                                        exc,
+                                        extra={
+                                            "event": "notification_processing_failed",
+                                            "monitoring_id": monitoring_id,
+                                            "user_id": self._user_id,
+                                            "result": result.status.value,
+                                        },
+                                    )
+                            previous_status = result.status
+                            if stop_event.wait(settings.check_interval_seconds):
+                                break
+                except Exception as exc:
+                    if stop_event.is_set():
+                        break
+                    LOGGER.exception(
+                        "Worker será reiniciado após falha inesperada: %s",
+                        exc,
+                        extra={
+                            "event": "monitor_worker_recovering",
+                            "monitoring_id": monitoring_id,
+                            "user_id": self._user_id,
+                        },
+                    )
+                    try:
+                        self._set_result(AvailabilityStatus.ERRO, str(exc), monitoring_id)
+                    except Exception:
+                        LOGGER.exception(
+                            "O estado de falha não pôde ser persistido.",
+                            extra={
+                                "event": "monitor_error_persistence_failed",
+                                "monitoring_id": monitoring_id,
+                                "user_id": self._user_id,
+                            },
+                        )
+                        self._set_runtime_error(str(exc), monitoring_id)
                     if stop_event.wait(settings.check_interval_seconds):
                         break
-        except Exception as exc:
-            LOGGER.exception("O monitoramento foi interrompido: %s", exc)
-            try:
-                self._set_result(AvailabilityStatus.ERRO, str(exc), monitoring_id)
-            except Exception:
-                LOGGER.exception("O estado de erro não pôde ser persistido.")
-                self._set_runtime_error(str(exc), monitoring_id)
         finally:
             with self._lock:
                 self._snapshot = MonitorSnapshot(
