@@ -652,7 +652,7 @@ def _template_parameters(settings: Settings, detected_at: str) -> list[str]:
 
 
 def _format_time(value: str) -> str:
-    return datetime.fromisoformat(value).astimezone().strftime("%H:%M")
+    return datetime.fromisoformat(value).strftime("%H:%M")
 
 
 def _bounded_integer(name: str, default: int, minimum: int, maximum: int) -> int:
