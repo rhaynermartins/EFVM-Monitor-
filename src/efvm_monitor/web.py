@@ -270,6 +270,9 @@ def create_app(
         description="Interface local de consulta de disponibilidade, sem compra de passagem.",
         version="0.6.0",
         lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
     )
 
     def session_for_request(request: Request) -> AuthenticatedSession | None:
@@ -353,6 +356,25 @@ def create_app(
                 )
         request.state.session = session
         return await call_next(request)
+
+    @application.middleware("http")
+    async def add_security_headers(request: Request, call_next: Callable[..., Any]):
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; "
+            "form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; "
+            "manifest-src 'self'; object-src 'none'; script-src 'self'; style-src 'self'; "
+            "worker-src 'self'"
+        )
+        response.headers["Permissions-Policy"] = (
+            "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
+        )
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        if request.url.scheme == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000"
+        return response
 
     application.mount(
         "/static",
