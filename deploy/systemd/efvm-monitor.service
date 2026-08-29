@@ -9,6 +9,7 @@ User=efvm
 Group=efvm
 WorkingDirectory=/opt/efvm-monitor/app
 EnvironmentFile=/etc/efvm-monitor/efvm-monitor.env
+Environment=EFVM_LOG_FORMAT=json
 ExecStart=/opt/efvm-monitor/venv/bin/uvicorn efvm_monitor.web:app --host 127.0.0.1 --port 8000 --workers 1 --log-level info
 Restart=on-failure
 RestartSec=5s
