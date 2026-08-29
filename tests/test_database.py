@@ -47,6 +47,14 @@ def test_initialization_is_idempotent_and_non_destructive(tmp_path: Path) -> Non
     assert len(restarted.list_monitors()) == 1
 
 
+def test_reports_database_availability_after_initialization(tmp_path: Path) -> None:
+    unavailable = MonitoringRepository(tmp_path / "missing" / "monitor.db")
+    available = repository(tmp_path)
+
+    assert unavailable.is_available() is False
+    assert available.is_available() is True
+
+
 def test_records_history_and_availability_changes(tmp_path: Path) -> None:
     storage = repository(tmp_path)
     monitor = storage.create_monitor(settings())
