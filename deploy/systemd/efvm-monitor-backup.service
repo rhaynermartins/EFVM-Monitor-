@@ -1,0 +1,14 @@
+[Unit]
+Description=Create a verified EFVM Monitor SQLite backup
+After=efvm-monitor.service
+
+[Service]
+Type=oneshot
+User=efvm
+Group=efvm
+EnvironmentFile=/etc/efvm-monitor/efvm-monitor.env
+ExecStart=/opt/efvm-monitor/app/deploy/backup-sqlite.sh
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
