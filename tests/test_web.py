@@ -133,6 +133,11 @@ def test_home_renders_phase_eight_guidance_and_interface_states(
     assert 'id="next-check"' in response.text
     assert 'id="ios-install-help"' in response.text
     assert 'id="android-install-help"' in response.text
+    assert 'class="brand-icon"' in response.text
+    assert "Abra esta página pelo Safari." in response.text
+    assert "Adicionar à Tela de Início" in response.text
+    assert "Abra esta página no Chrome." in response.text
+    assert "Instalar app" in response.text
     assert response.text.index('id="onboarding"') < response.text.index('id="monitor-form"')
 
 
@@ -148,9 +153,14 @@ def test_phase_eight_assets_include_accessible_mobile_states(
     assert stylesheet.status_code == 200
     assert "function configureInstallationExperience()" in javascript.text
     assert "function updateConnectionState()" in javascript.text
+    assert 'elements.installTitle.textContent = "Aplicativo instalado"' in javascript.text
     assert "Passagem encontrada 🔔" in javascript.text
     assert "Próxima verificação prevista" in javascript.text
     assert ':where(a, button, input, select):focus-visible' in stylesheet.text
+    assert ".monitor-card-heading" in stylesheet.text
+    assert "flex-wrap: wrap" in stylesheet.text
+    assert ".monitor-message" in stylesheet.text
+    assert "overflow-wrap: anywhere" in stylesheet.text
     assert '@media (max-width: 600px)' in stylesheet.text
 
 
