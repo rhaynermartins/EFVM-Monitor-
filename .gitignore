@@ -12,6 +12,8 @@ build/
 logs/*.log
 data/*.db*
 data/*.sqlite*
+*.key
+*.pem
 .DS_Store
 .idea/
 .vscode/
