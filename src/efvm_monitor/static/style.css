@@ -463,7 +463,22 @@ a {
   inline-size: 100%;
   min-inline-size: 0;
   max-inline-size: 100%;
+  padding-inline: 0;
   -webkit-min-logical-width: 0;
+}
+
+.field input[type="date"]::-webkit-date-and-time-value {
+  min-width: 0;
+  padding-inline-start: 13px;
+}
+
+.field input[type="date"]::-webkit-datetime-edit {
+  min-width: 0;
+}
+
+.field input[type="date"]::-webkit-calendar-picker-indicator {
+  flex: 0 0 auto;
+  margin-inline-end: 13px;
 }
 
 .field input:hover,
