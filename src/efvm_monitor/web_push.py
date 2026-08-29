@@ -132,7 +132,15 @@ class WebPushNotifier:
             recipient_masked=f"{len(subscriptions)} dispositivo(s)",
         )
         if delivery is None:
-            LOGGER.info("Alerta Web Push já registrado para esta disponibilidade.")
+            LOGGER.info(
+                "Alerta Web Push já registrado para esta disponibilidade.",
+                extra={
+                    "event": "notification_delivery_deduplicated",
+                    "monitoring_id": monitoring_id,
+                    "result": result.status.value,
+                    "channel": WEB_PUSH_CHANNEL,
+                },
+            )
             return
 
         successes = 0
@@ -145,7 +153,17 @@ class WebPushNotifier:
             except WebPushSendError as exc:
                 attempts += exc.attempts
                 errors.append(str(exc))
-                LOGGER.warning("Dispositivo Web Push não recebeu o alerta: %s", exc)
+                LOGGER.warning(
+                    "Dispositivo Web Push não recebeu o alerta: %s",
+                    exc,
+                    extra={
+                        "event": "notification_device_failed",
+                        "monitoring_id": monitoring_id,
+                        "result": result.status.value,
+                        "channel": WEB_PUSH_CHANNEL,
+                        "attempts": exc.attempts,
+                    },
+                )
 
         status = NotificationStatus.SENT if successes else NotificationStatus.FAILED
         self.repository.complete_notification(
@@ -154,6 +172,21 @@ class WebPushNotifier:
             attempt_count=attempts,
             error_message="; ".join(errors) or None,
             external_message_id=f"{successes}/{len(subscriptions)} dispositivo(s)",
+        )
+        LOGGER.info(
+            "Entrega Web Push processada para %s dispositivo(s).",
+            len(subscriptions),
+            extra={
+                "event": (
+                    "notification_delivery_sent"
+                    if status is NotificationStatus.SENT
+                    else "notification_delivery_failed"
+                ),
+                "monitoring_id": monitoring_id,
+                "result": result.status.value,
+                "channel": WEB_PUSH_CHANNEL,
+                "attempts": attempts,
+            },
         )
 
     def send_test(self, device_id: str, user_id: int) -> int:
