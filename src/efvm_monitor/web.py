@@ -879,6 +879,9 @@ def _cookie_secure() -> bool:
     raise ConfigurationError("EFVM_COOKIE_SECURE deve ser verdadeiro ou falso.")
 
 
+if os.getenv("EFVM_LOG_FORMAT"):
+    _configure_logging(os.getenv("EFVM_LOG_LEVEL", "INFO").strip().upper())
+
 app = create_app()
 
 
