@@ -57,6 +57,21 @@ a {
   color: inherit;
 }
 
+:where(a, button, input, select):focus-visible {
+  outline: 3px solid rgb(23 107 77 / 30%);
+  outline-offset: 3px;
+}
+
+.connection-banner {
+  padding: 10px 20px;
+  color: #5f4200;
+  background: var(--yellow-soft);
+  border-bottom: 1px solid rgb(168 111 0 / 22%);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-align: center;
+}
+
 .site-header {
   border-bottom: 1px solid rgb(220 228 223 / 90%);
   background: rgb(255 255 255 / 88%);
@@ -181,6 +196,163 @@ a {
   margin: 20px 0 0;
   color: var(--muted);
   font-size: 1.04rem;
+}
+
+.onboarding-panel {
+  margin-bottom: 22px;
+}
+
+.onboarding-panel.is-complete {
+  border-color: rgb(23 107 77 / 30%);
+}
+
+.onboarding-heading {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.onboarding-heading h2 {
+  margin: 0;
+  font-size: 1.35rem;
+  letter-spacing: -0.025em;
+}
+
+.onboarding-progress {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  color: var(--green-dark);
+  background: var(--green-soft);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.onboarding-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 22px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboarding-step {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  padding: 13px;
+  background: #f8faf9;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.onboarding-step.is-complete {
+  background: var(--green-soft);
+  border-color: rgb(23 107 77 / 22%);
+}
+
+.onboarding-step-marker {
+  display: grid;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  color: var(--muted);
+  background: white;
+  border: 1px solid #cfd9d3;
+  border-radius: 50%;
+  font-size: 0.74rem;
+  font-weight: 850;
+  place-items: center;
+}
+
+.onboarding-step.is-complete .onboarding-step-marker {
+  color: white;
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.onboarding-step strong,
+.onboarding-step small {
+  display: block;
+}
+
+.onboarding-step strong {
+  font-size: 0.82rem;
+}
+
+.onboarding-step small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.platform-install-help {
+  display: block;
+  margin-top: 8px;
+  padding: 8px 9px;
+  color: #394a42;
+  background: rgb(255 255 255 / 82%);
+  border-radius: 8px;
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.device-summary {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 12px 14px;
+  color: #394a42;
+  background: var(--canvas);
+  border-radius: 11px;
+}
+
+.device-summary-icon {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.device-summary strong,
+.device-summary small {
+  display: block;
+}
+
+.device-summary strong {
+  font-size: 0.82rem;
+}
+
+.device-summary small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.device-summary[data-state="protected"] {
+  background: var(--green-soft);
+}
+
+.device-summary[data-state="protected"] .device-summary-icon {
+  color: var(--green);
+}
+
+.device-summary[data-state="attention"] {
+  background: var(--yellow-soft);
+}
+
+.device-summary[data-state="attention"] .device-summary-icon {
+  color: var(--yellow);
+}
+
+.device-summary[data-state="blocked"] {
+  background: var(--red-soft);
+}
+
+.device-summary[data-state="blocked"] .device-summary-icon {
+  color: var(--red);
 }
 
 .content-grid {
@@ -375,16 +547,6 @@ a {
   opacity: 0.5;
 }
 
-.ios-install-help {
-  display: block;
-  margin-top: 9px;
-  padding: 9px 10px;
-  color: #394a42;
-  background: rgb(255 255 255 / 72%);
-  border-radius: 8px;
-  font-size: 0.73rem;
-}
-
 .notification-option em {
   margin-left: 5px;
   padding: 3px 6px;
@@ -515,6 +677,37 @@ a {
   border-radius: 15px;
 }
 
+#current-monitor-detail[data-state="tem-vaga"] .status-display {
+  background: var(--green-soft);
+  border-color: rgb(23 107 77 / 24%);
+}
+
+#current-monitor-detail[data-state="sem-vaga"] .status-icon {
+  color: var(--yellow);
+  background: var(--yellow-soft);
+}
+
+#current-monitor-detail[data-state="erro"] .status-icon {
+  color: var(--red);
+  background: var(--red-soft);
+}
+
+.dashboard-state {
+  margin: 0;
+  padding: 18px;
+  color: var(--muted);
+  background: #f8faf9;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  font-size: 0.82rem;
+}
+
+.dashboard-state[data-state="error"] {
+  color: var(--red);
+  background: var(--red-soft);
+  border-color: rgb(177 58 50 / 18%);
+}
+
 .monitors-empty {
   margin: 0;
   padding: 18px;
@@ -540,6 +733,15 @@ a {
 .monitor-card.selected {
   border-color: rgb(23 107 77 / 42%);
   box-shadow: 0 0 0 2px rgb(23 107 77 / 8%);
+}
+
+.monitor-card[data-state="tem-vaga"] {
+  background: var(--green-soft);
+  border-color: rgb(23 107 77 / 28%);
+}
+
+.monitor-card[data-state="erro"] {
+  border-color: rgb(177 58 50 / 24%);
 }
 
 .monitor-card-heading {
@@ -668,7 +870,8 @@ a {
 }
 
 .text-button {
-  padding: 3px 0;
+  min-height: 40px;
+  padding: 8px 0;
   color: var(--green-dark);
   background: transparent;
   border: 0;
@@ -676,6 +879,11 @@ a {
   font-weight: 750;
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+.text-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .history-empty {
@@ -831,6 +1039,10 @@ footer {
   .content-grid {
     grid-template-columns: 1fr;
   }
+
+  .onboarding-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 600px) {
@@ -867,6 +1079,10 @@ footer {
     padding-top: 42px;
   }
 
+  .intro {
+    margin-bottom: 28px;
+  }
+
   .intro h1 {
     font-size: 2.35rem;
   }
@@ -874,6 +1090,27 @@ footer {
   .panel {
     padding: 21px;
     border-radius: 17px;
+  }
+
+  .onboarding-heading {
+    display: grid;
+    gap: 12px;
+  }
+
+  .onboarding-progress {
+    justify-self: start;
+  }
+
+  .onboarding-steps {
+    grid-template-columns: 1fr;
+  }
+
+  .onboarding-step {
+    padding: 14px;
+  }
+
+  .device-summary {
+    align-items: flex-start;
   }
 
   .panel-heading {
@@ -894,6 +1131,13 @@ footer {
 
   .monitor-actions {
     gap: 10px 18px;
+  }
+
+  .monitor-actions .text-button,
+  .push-actions .text-button,
+  .history-heading .text-button,
+  .onboarding-step .text-button {
+    min-height: 44px;
   }
 
   .push-option {
