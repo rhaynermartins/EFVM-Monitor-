@@ -253,7 +253,7 @@ def availability_payload(settings: Settings, detected_at: str) -> dict[str, Any]
     passenger_label = (
         "1 passageiro" if settings.passengers == 1 else f"{settings.passengers} passageiros"
     )
-    detected = datetime.fromisoformat(detected_at).astimezone().strftime("%H:%M")
+    detected = datetime.fromisoformat(detected_at).strftime("%H:%M")
     return {
         "title": "🚨 Passagem encontrada",
         "body": (
