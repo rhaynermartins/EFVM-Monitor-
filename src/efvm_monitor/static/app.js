@@ -1,6 +1,7 @@
 "use strict";
 
 const elements = {
+  connectionBanner: document.querySelector("#connection-banner"),
   form: document.querySelector("#monitor-form"),
   origin: document.querySelector("#origin"),
   destination: document.querySelector("#destination"),
@@ -16,6 +17,18 @@ const elements = {
   disablePush: document.querySelector("#disable-push"),
   installApp: document.querySelector("#install-app"),
   iosInstallHelp: document.querySelector("#ios-install-help"),
+  androidInstallHelp: document.querySelector("#android-install-help"),
+  desktopInstallHelp: document.querySelector("#desktop-install-help"),
+  installStatus: document.querySelector("#install-status"),
+  onboarding: document.querySelector("#onboarding"),
+  onboardingProgress: document.querySelector("#onboarding-progress"),
+  onboardingMonitor: document.querySelector("#onboarding-monitor"),
+  onboardingInstall: document.querySelector("#onboarding-install"),
+  onboardingPush: document.querySelector("#onboarding-push"),
+  onboardingPushStatus: document.querySelector("#onboarding-push-status"),
+  deviceSummary: document.querySelector("#device-summary"),
+  deviceSummaryTitle: document.querySelector("#device-summary-title"),
+  deviceSummaryDescription: document.querySelector("#device-summary-description"),
   startButton: document.querySelector("#start-button"),
   stopButton: document.querySelector("#stop-button"),
   catalogState: document.querySelector("#catalog-state"),
@@ -24,6 +37,8 @@ const elements = {
   statusIcon: document.querySelector("#status-icon"),
   statusMessage: document.querySelector("#status-message"),
   lastCheck: document.querySelector("#last-check"),
+  nextCheck: document.querySelector("#next-check"),
+  dashboardState: document.querySelector("#dashboard-state"),
   monitorsEmpty: document.querySelector("#monitors-empty"),
   monitorsList: document.querySelector("#monitors-list"),
   currentMonitorDetail: document.querySelector("#current-monitor-detail"),
@@ -47,6 +62,9 @@ let pushRegistration = null;
 let pushConfig = null;
 let pushSubscribed = false;
 let deferredInstallPrompt = null;
+let appInstalled = isStandalone();
+let pushLifecycleState = "checking";
+let refreshInProgress = false;
 const pushDeviceId = getPushDeviceId();
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
 
@@ -178,9 +196,10 @@ async function loadCatalog() {
     elements.catalogState.className = "catalog-state ready";
     setControls(false);
   } catch (error) {
-    elements.catalogState.textContent = "Catálogo indisponível";
+    console.error("Não foi possível carregar o catálogo.", error);
+    elements.catalogState.textContent = "Opções indisponíveis";
     elements.catalogState.className = "catalog-state error";
-    setFormError(error.message);
+    setFormError("Não foi possível carregar as estações agora. Atualize a página para tentar novamente.");
   }
 }
 
@@ -218,6 +237,28 @@ function statusIcon(status) {
   }[status] || "?";
 }
 
+function statusLabel(state) {
+  if (!state.running) return "Pausado";
+  return {
+    AGUARDANDO: "Iniciando",
+    ENCERRANDO: "Pausando",
+    TEM_VAGA: "Passagem encontrada",
+    SEM_VAGA: "Sem vagas",
+    ERRO: "Atenção",
+  }[state.status] || "Acompanhando";
+}
+
+function friendlyStatusMessage(state) {
+  if (!state.running) return "Este monitor está pausado e não fará novas consultas.";
+  return {
+    AGUARDANDO: "A primeira consulta será feita em instantes.",
+    ENCERRANDO: "O monitor está sendo pausado.",
+    TEM_VAGA: "Passagem encontrada. Abra o portal oficial para concluir a compra.",
+    SEM_VAGA: "Nenhuma vaga foi encontrada na última consulta.",
+    ERRO: "Não foi possível verificar agora. O monitor tentará novamente.",
+  }[state.status] || "O monitor está acompanhando esta viagem.";
+}
+
 function stationName(id) {
   return stationsById.get(String(id)) || String(id);
 }
@@ -226,6 +267,35 @@ function formatTravelDate(value) {
   if (!value) return "—";
   const [year, month, day] = value.split("-");
   return `${day}/${month}/${year}`;
+}
+
+function formatInterval(seconds) {
+  if (seconds < 60) return `${seconds} segundos`;
+  const minutes = Math.round(seconds / 60);
+  return `${minutes} ${minutes === 1 ? "minuto" : "minutos"}`;
+}
+
+function formatDateTime(value) {
+  return new Date(value).toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function nextCheckMessage(state) {
+  if (!state.running) return "Próxima verificação: monitor pausado.";
+  if (!state.checked_at) return "Próxima verificação: assim que a primeira consulta começar.";
+  const intervalSeconds = Number(state.query?.check_interval_seconds || 0);
+  const nextCheckAt = new Date(state.checked_at).getTime() + intervalSeconds * 1000;
+  if (!Number.isFinite(nextCheckAt) || nextCheckAt <= Date.now()) {
+    return "Próxima verificação prevista: a qualquer momento.";
+  }
+  return `Próxima verificação prevista: ${new Date(nextCheckAt).toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}.`;
 }
 
 function applyQueryToForm(query) {
@@ -251,8 +321,9 @@ function renderQuery(query) {
   elements.querySummary.hidden = !query;
   if (!query) return;
   elements.summaryRoute.textContent = `${stationName(query.origin)} → ${stationName(query.destination)}`;
-  elements.summaryDateClass.textContent = `${formatTravelDate(query.travel_date)} · ${query.travel_class} · 1 passageiro`;
-  elements.summaryInterval.textContent = `${query.check_interval_seconds} segundos`;
+  const passengers = Number(query.passengers || 1);
+  elements.summaryDateClass.textContent = `${formatTravelDate(query.travel_date)} · ${query.travel_class} · ${passengers} ${passengers === 1 ? "passageiro" : "passageiros"}`;
+  elements.summaryInterval.textContent = formatInterval(query.check_interval_seconds);
   const alertChannels = [];
   if (pushSubscribed) alertChannels.push("Web Push (principal)");
   if (query.sms_enabled) alertChannels.push("SMS");
@@ -262,20 +333,31 @@ function renderQuery(query) {
 
 function renderState(state) {
   elements.currentMonitorDetail.hidden = false;
-  elements.statusIcon.textContent = statusIcon(state.status);
-  elements.statusMessage.textContent = state.message;
+  const visualStatus = state.running ? state.status : "PARADO";
+  elements.currentMonitorDetail.dataset.state = visualStatus.toLowerCase().replaceAll("_", "-");
+  elements.statusIcon.textContent = statusIcon(visualStatus);
+  elements.statusMessage.textContent = friendlyStatusMessage(state);
   elements.lastCheck.textContent = state.checked_at
-    ? `Última verificação: ${new Date(state.checked_at).toLocaleString("pt-BR")}`
+    ? `Última verificação: ${formatDateTime(state.checked_at)}.`
     : "A última verificação aparecerá aqui.";
+  elements.nextCheck.textContent = nextCheckMessage(state);
   renderQuery(state.query);
 }
 
-function monitorAction(label, action, destructive = false) {
+function monitorAction(label, action, destructive = false, accessibleLabel = label) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = `text-button${destructive ? " text-button-danger" : ""}`;
   button.textContent = label;
-  button.addEventListener("click", action);
+  button.setAttribute("aria-label", accessibleLabel);
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await action();
+    } finally {
+      button.disabled = false;
+    }
+  });
   return button;
 }
 
@@ -286,24 +368,30 @@ function renderMonitors(items) {
   }
   elements.monitorsList.replaceChildren();
   elements.monitorsEmpty.hidden = items.length > 0;
+  elements.dashboardState.hidden = true;
+  elements.monitorsList.setAttribute("aria-busy", "false");
   elements.statusBadge.textContent = `${items.length} ${items.length === 1 ? "MONITOR" : "MONITORES"}`;
   elements.statusBadge.className = `status-badge ${
     items.some((item) => item.running) ? "status-aguardando" : "status-parado"
   }`;
 
   items.forEach((state) => {
+    const routeLabel = `${stationName(state.query.origin)} para ${stationName(state.query.destination)}`;
+    const visualStatus = state.running ? state.status : "PARADO";
     const card = document.createElement("article");
     card.className = "monitor-card";
+    card.dataset.state = visualStatus.toLowerCase().replaceAll("_", "-");
+    card.setAttribute("aria-label", `${routeLabel}: ${statusLabel(state)}`);
     if (state.monitoring_id === selectedMonitorId) card.classList.add("selected");
 
     const heading = document.createElement("div");
     heading.className = "monitor-card-heading";
     const identity = document.createElement("span");
     identity.className = "monitor-identity";
-    identity.textContent = `Monitor #${state.monitoring_id}`;
+    identity.textContent = `Viagem #${state.monitoring_id}`;
     const badge = document.createElement("span");
-    badge.className = `status-badge ${statusClass(state.status)}`;
-    badge.textContent = state.status;
+    badge.className = `status-badge ${statusClass(visualStatus)}`;
+    badge.textContent = statusLabel(state);
     heading.append(identity, badge);
 
     const route = document.createElement("strong");
@@ -311,28 +399,52 @@ function renderMonitors(items) {
     route.textContent = `${stationName(state.query.origin)} → ${stationName(state.query.destination)}`;
     const meta = document.createElement("p");
     meta.className = "monitor-meta";
-    meta.textContent = `${formatTravelDate(state.query.travel_date)} · ${state.query.travel_class} · 1 passageiro · ${state.query.check_interval_seconds}s`;
+    meta.textContent = `${formatTravelDate(state.query.travel_date)} · ${state.query.travel_class} · 1 passageiro · a cada ${formatInterval(state.query.check_interval_seconds)}`;
     const message = document.createElement("p");
     message.className = "monitor-message";
-    message.textContent = state.message;
+    message.textContent = friendlyStatusMessage(state);
 
     const actions = document.createElement("div");
     actions.className = "monitor-actions";
     actions.append(
-      monitorAction("Ver histórico", async () => {
-        selectedMonitorId = state.monitoring_id;
-        renderMonitors(currentMonitors);
-        renderState(state);
-        await loadHistory(state.monitoring_id);
-      }),
+      monitorAction(
+        "Ver histórico",
+        async () => {
+          selectedMonitorId = state.monitoring_id;
+          renderMonitors(currentMonitors);
+          renderState(state);
+          await loadHistory(state.monitoring_id);
+        },
+        false,
+        `Ver histórico da viagem de ${routeLabel}`,
+      ),
     );
     if (state.running) {
-      actions.append(monitorAction("Pausar", () => pauseMonitor(state.monitoring_id)));
+      actions.append(
+        monitorAction(
+          "Pausar",
+          () => pauseMonitor(state.monitoring_id),
+          false,
+          `Pausar a viagem de ${routeLabel}`,
+        ),
+      );
     } else {
-      actions.append(monitorAction("Retomar", () => resumeMonitor(state.monitoring_id)));
+      actions.append(
+        monitorAction(
+          "Retomar",
+          () => resumeMonitor(state.monitoring_id),
+          false,
+          `Retomar a viagem de ${routeLabel}`,
+        ),
+      );
     }
     actions.append(
-      monitorAction("Remover", () => removeMonitor(state.monitoring_id), true),
+      monitorAction(
+        "Remover",
+        () => removeMonitor(state.monitoring_id),
+        true,
+        `Remover a viagem de ${routeLabel}`,
+      ),
     );
     card.append(heading, route, meta, message, actions);
     elements.monitorsList.append(card);
@@ -342,11 +454,13 @@ function renderMonitors(items) {
     selectedMonitorId = null;
     elements.currentMonitorDetail.hidden = true;
     renderHistory([]);
+    updateOnboarding();
     return;
   }
   const selected = items.find((item) => item.monitoring_id === selectedMonitorId) || items[0];
   selectedMonitorId = selected.monitoring_id;
   renderState(selected);
+  updateOnboarding();
 }
 
 function renderHistory(items) {
@@ -358,15 +472,23 @@ function renderHistory(items) {
 
     const result = document.createElement("span");
     result.className = `history-result history-result-${entry.result.toLowerCase().replaceAll("_", "-")}`;
-    result.textContent = entry.result;
+    result.textContent = {
+      TEM_VAGA: "Encontrada",
+      SEM_VAGA: "Sem vagas",
+      ERRO: "Atenção",
+    }[entry.result] || "Consulta";
 
     const details = document.createElement("div");
     details.className = "history-details";
     const message = document.createElement("strong");
-    message.textContent = entry.message;
+    message.textContent = {
+      TEM_VAGA: "Passagem encontrada 🔔",
+      SEM_VAGA: "Nenhuma vaga encontrada",
+      ERRO: "Não foi possível verificar",
+    }[entry.result] || "Consulta realizada";
     const checkedAt = document.createElement("time");
     checkedAt.dateTime = entry.checked_at;
-    checkedAt.textContent = new Date(entry.checked_at).toLocaleString("pt-BR");
+    checkedAt.textContent = formatDateTime(entry.checked_at);
     details.append(message, checkedAt);
     item.append(result, details);
     elements.historyList.append(item);
@@ -384,9 +506,10 @@ async function loadHistory(monitoringId = selectedMonitorId) {
     );
     renderHistory(history.items);
   } catch (error) {
+    console.error("Não foi possível carregar o histórico.", error);
     elements.historyList.replaceChildren();
     elements.historyEmpty.hidden = false;
-    elements.historyEmpty.textContent = `Histórico indisponível: ${error.message}`;
+    elements.historyEmpty.textContent = "Não foi possível carregar o histórico agora. Tente novamente.";
   }
 }
 
@@ -394,9 +517,100 @@ function isIos() {
   return /iphone|ipad|ipod/i.test(window.navigator.userAgent);
 }
 
+function isAndroid() {
+  return /android/i.test(window.navigator.userAgent);
+}
+
 function isStandalone() {
   return window.matchMedia("(display-mode: standalone)").matches ||
     window.navigator.standalone === true;
+}
+
+function notificationPermission() {
+  return "Notification" in window ? Notification.permission : "unsupported";
+}
+
+function setOnboardingStep(step, complete, pendingMarker) {
+  step.classList.toggle("is-complete", complete);
+  step.querySelector(".onboarding-step-marker").textContent = complete ? "✓" : pendingMarker;
+}
+
+function updateDeviceSummary() {
+  let state = "ready";
+  let title = "Este dispositivo ainda não recebe alertas";
+  let description = "Ative o Web Push para ser avisado quando uma passagem aparecer.";
+
+  if (!navigator.onLine) {
+    state = "attention";
+    title = "Este dispositivo está sem conexão";
+    description = "Seus monitores continuam no servidor e voltarão a aparecer quando a internet retornar.";
+  } else if (pushSubscribed) {
+    state = "protected";
+    title = "Este dispositivo está protegido";
+    description = "O Web Push está ativo e pode avisar mesmo com o aplicativo fechado.";
+  } else if (notificationPermission() === "denied") {
+    state = "blocked";
+    title = "Notificações bloqueadas neste dispositivo";
+    description = "Libere as notificações nas configurações do navegador ou do celular.";
+  } else if (isIos() && !appInstalled) {
+    state = "attention";
+    title = "Instale o aplicativo no iPhone";
+    description = "A instalação pela Tela de Início é necessária antes de ativar os alertas.";
+  } else if (pushLifecycleState === "unavailable") {
+    state = "blocked";
+    title = "Alertas indisponíveis neste momento";
+    description = "Tente novamente mais tarde ou use outro navegador compatível.";
+  } else if (pushLifecycleState === "needs-renewal") {
+    state = "attention";
+    title = "Este dispositivo precisa ser protegido novamente";
+    description = "Toque em “Ativar alertas” para renovar a proteção.";
+  }
+
+  elements.deviceSummary.dataset.state = state;
+  elements.deviceSummaryTitle.textContent = title;
+  elements.deviceSummaryDescription.textContent = description;
+}
+
+function updateOnboarding() {
+  const hasMonitor = currentMonitors.length > 0;
+  const installationComplete = appInstalled || isStandalone();
+  setOnboardingStep(elements.onboardingMonitor, hasMonitor, "2");
+  setOnboardingStep(elements.onboardingInstall, installationComplete, "3");
+  setOnboardingStep(elements.onboardingPush, pushSubscribed, "4");
+
+  const completedSteps = 1 + Number(hasMonitor) + Number(installationComplete) + Number(pushSubscribed);
+  elements.onboardingProgress.textContent = completedSteps === 4
+    ? "Tudo pronto"
+    : `${completedSteps} de 4 concluídos`;
+  elements.onboarding.classList.toggle("is-complete", completedSteps === 4);
+  elements.onboardingPushStatus.textContent = pushSubscribed
+    ? "Alertas ativos neste dispositivo."
+    : notificationPermission() === "denied"
+      ? "As notificações estão bloqueadas nas configurações."
+      : "Ative o Web Push no Passo 1 para receber alertas.";
+  updateDeviceSummary();
+}
+
+function configureInstallationExperience() {
+  appInstalled = appInstalled || isStandalone();
+  elements.iosInstallHelp.hidden = true;
+  elements.androidInstallHelp.hidden = true;
+  elements.desktopInstallHelp.hidden = true;
+  elements.installApp.hidden = !deferredInstallPrompt || appInstalled;
+
+  if (appInstalled) {
+    elements.installStatus.textContent = "Aplicativo instalado neste dispositivo.";
+  } else if (isIos()) {
+    elements.installStatus.textContent = "Falta adicionar o aplicativo à Tela de Início.";
+    elements.iosInstallHelp.hidden = false;
+  } else if (isAndroid()) {
+    elements.installStatus.textContent = "Instale para abrir com facilidade pelo celular.";
+    elements.androidInstallHelp.hidden = false;
+  } else {
+    elements.installStatus.textContent = "A instalação é opcional neste computador.";
+    elements.desktopInstallHelp.hidden = false;
+  }
+  updateOnboarding();
 }
 
 function urlBase64ToUint8Array(value) {
@@ -417,6 +631,8 @@ function pushSubscriptionPayload(subscription) {
 function renderPushStatus(message, state = "idle") {
   elements.pushStatus.textContent = message;
   elements.pushStatus.dataset.state = state;
+  pushLifecycleState = state;
+  updateOnboarding();
 }
 
 async function loadPushState() {
@@ -424,21 +640,20 @@ async function loadPushState() {
   try {
     pushConfig = await fetchJson("/api/push/config");
     if (!pushConfig.enabled || !pushConfig.configured) {
-      renderPushStatus("INDISPONÍVEL — configure as chaves VAPID no servidor.", "unavailable");
+      renderPushStatus("Alertas indisponíveis no momento.", "unavailable");
       return;
     }
     if (!("serviceWorker" in navigator) || !("PushManager" in window) ||
         !("Notification" in window)) {
-      renderPushStatus("NÃO SUPORTADO NESTE NAVEGADOR", "unavailable");
+      renderPushStatus("Este navegador não oferece notificações.", "unavailable");
       return;
     }
     if (!window.isSecureContext) {
-      renderPushStatus("HTTPS NECESSÁRIO FORA DO COMPUTADOR LOCAL", "unavailable");
+      renderPushStatus("Abra o endereço seguro do EFVM Monitor para ativar alertas.", "unavailable");
       return;
     }
     if (isIos() && !isStandalone()) {
-      elements.iosInstallHelp.hidden = false;
-      renderPushStatus("INSTALAÇÃO NECESSÁRIA NO IPHONE", "attention");
+      renderPushStatus("Instale o aplicativo no iPhone antes de ativar os alertas.", "attention");
       return;
     }
 
@@ -451,16 +666,22 @@ async function loadPushState() {
     pushSubscribed = Boolean(browserSubscription && serverStatus.subscribed);
 
     if (Notification.permission === "denied") {
-      renderPushStatus("BLOQUEADO NAS CONFIGURAÇÕES DO NAVEGADOR", "unavailable");
+      renderPushStatus("Notificações bloqueadas. Libere nas configurações do dispositivo.", "blocked");
       return;
     }
     if (pushSubscribed) {
-      renderPushStatus("ATIVO NESTE DISPOSITIVO", "active");
+      renderPushStatus("Alertas ativos neste dispositivo.", "active");
       elements.activatePush.hidden = true;
       elements.testPush.hidden = false;
       elements.disablePush.hidden = false;
+    } else if (browserSubscription && !serverStatus.subscribed) {
+      renderPushStatus("Este dispositivo precisa ser ativado novamente.", "needs-renewal");
+      elements.activatePush.hidden = false;
+      elements.activatePush.disabled = false;
+      elements.testPush.hidden = true;
+      elements.disablePush.hidden = true;
     } else {
-      renderPushStatus("PRONTO PARA ATIVAR", "ready");
+      renderPushStatus("Pronto para ativar neste dispositivo.", "ready");
       elements.activatePush.hidden = false;
       elements.activatePush.disabled = false;
       elements.testPush.hidden = true;
@@ -468,12 +689,13 @@ async function loadPushState() {
     }
     renderQuery(currentQuery);
   } catch (error) {
-    renderPushStatus(`INDISPONÍVEL — ${error.message}`, "unavailable");
+    console.error("Não foi possível confirmar o Web Push.", error);
+    renderPushStatus("Não foi possível confirmar os alertas agora. Tente novamente.", "unavailable");
   }
 }
 
 async function activatePush() {
-  renderPushStatus("AGUARDANDO SUA AUTORIZAÇÃO…", "attention");
+  renderPushStatus("Aguardando sua autorização…", "attention");
   elements.activatePush.disabled = true;
   try {
     if (!pushRegistration || !pushConfig?.public_key) {
@@ -481,7 +703,7 @@ async function activatePush() {
     }
     const permission = await Notification.requestPermission();
     if (permission !== "granted") {
-      throw new Error("A permissão de notificações não foi concedida.");
+      throw new Error("A notificação não foi autorizada. Você pode liberar nas configurações.");
     }
     let subscription = await pushRegistration.pushManager.getSubscription();
     if (!subscription) {
@@ -514,21 +736,23 @@ async function disablePush() {
     pushSubscribed = false;
     await loadPushState();
   } catch (error) {
-    renderPushStatus(`Não foi possível desativar: ${error.message}`, "unavailable");
+    console.error("Não foi possível desativar o Web Push.", error);
+    renderPushStatus("Não foi possível desativar agora. Tente novamente.", "unavailable");
   }
 }
 
 async function testPush() {
   elements.testPush.disabled = true;
-  renderPushStatus("ENVIANDO TESTE…", "attention");
+  renderPushStatus("Enviando alerta de teste…", "attention");
   try {
     await fetchJson("/api/push/test", {
       method: "POST",
       body: JSON.stringify({ device_id: pushDeviceId }),
     });
-    renderPushStatus("TESTE ENVIADO PARA ESTE DISPOSITIVO", "active");
+    renderPushStatus("Alerta de teste enviado para este dispositivo.", "active");
   } catch (error) {
-    renderPushStatus(`TESTE NÃO ENVIADO — ${error.message}`, "unavailable");
+    console.error("Não foi possível enviar o alerta de teste.", error);
+    renderPushStatus("O alerta de teste não foi enviado. Tente novamente.", "unavailable");
   } finally {
     elements.testPush.disabled = false;
   }
@@ -544,6 +768,7 @@ async function startMonitoring(event) {
 
   try {
     elements.startButton.disabled = true;
+    elements.startButton.textContent = "Adicionando viagem…";
     const state = await fetchJson("/api/monitoramentos", {
       method: "POST",
       body: JSON.stringify({
@@ -561,9 +786,15 @@ async function startMonitoring(event) {
     selectedMonitorId = state.monitoring_id;
     await refreshState();
     setControls(false);
+    document.querySelector(".status-panel")?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "start",
+    });
   } catch (error) {
     setFormError(error.message);
     setControls(false);
+  } finally {
+    elements.startButton.textContent = "Adicionar monitoramento";
   }
 }
 
@@ -600,7 +831,7 @@ async function resumeMonitor(monitoringId) {
 
 async function removeMonitor(monitoringId) {
   const confirmed = window.confirm(
-    `Remover o monitor #${monitoringId}? O histórico continuará preservado localmente.`,
+    `Remover a viagem #${monitoringId}? Ela deixará de aparecer na sua conta.`,
   );
   if (!confirmed) return;
   setFormError();
@@ -614,13 +845,29 @@ async function removeMonitor(monitoringId) {
 }
 
 async function refreshState() {
+  if (refreshInProgress || !navigator.onLine) return;
+  refreshInProgress = true;
   try {
     const response = await fetchJson("/api/monitoramentos");
     renderMonitors(response.items);
     await loadHistory(selectedMonitorId);
   } catch (error) {
-    setFormError(`Não foi possível atualizar o estado: ${error.message}`);
+    console.error("Não foi possível atualizar os monitoramentos.", error);
+    elements.dashboardState.hidden = false;
+    elements.dashboardState.dataset.state = "error";
+    elements.dashboardState.textContent = "Não foi possível atualizar suas viagens agora. Tente novamente em instantes.";
+    elements.monitorsList.setAttribute("aria-busy", "false");
+  } finally {
+    refreshInProgress = false;
   }
+}
+
+function updateConnectionState() {
+  const offline = !navigator.onLine;
+  elements.connectionBanner.hidden = !offline;
+  document.body.classList.toggle("is-offline", offline);
+  updateDeviceSummary();
+  if (!offline) refreshState();
 }
 
 elements.form.addEventListener("submit", startMonitoring);
@@ -635,20 +882,26 @@ elements.installApp.addEventListener("click", async () => {
   deferredInstallPrompt.prompt();
   await deferredInstallPrompt.userChoice;
   deferredInstallPrompt = null;
-  elements.installApp.hidden = true;
+  configureInstallationExperience();
 });
 
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
   deferredInstallPrompt = event;
-  elements.installApp.hidden = false;
+  configureInstallationExperience();
 });
 
 window.addEventListener("appinstalled", () => {
   deferredInstallPrompt = null;
-  elements.installApp.hidden = true;
+  appInstalled = true;
+  configureInstallationExperience();
 });
 
+window.addEventListener("offline", updateConnectionState);
+window.addEventListener("online", updateConnectionState);
+
+configureInstallationExperience();
+updateConnectionState();
 Promise.all([loadCatalog(), refreshState(), loadPushState()]).finally(() => {
   window.setInterval(refreshState, 3000);
 });
