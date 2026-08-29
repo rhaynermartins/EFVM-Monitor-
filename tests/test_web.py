@@ -114,6 +114,46 @@ def test_home_renders_complete_form(web_client: tuple[TestClient, StubMonitor]) 
     assert response.text.index("Configure a viagem") < response.text.index("Acompanhe o estado")
 
 
+def test_home_renders_phase_eight_guidance_and_interface_states(
+    web_client: tuple[TestClient, StubMonitor],
+) -> None:
+    client, _ = web_client
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "O EFVM Monitor procura a passagem por você e avisa quando aparecer." in response.text
+    assert 'id="onboarding"' in response.text
+    assert 'id="onboarding-monitor"' in response.text
+    assert 'id="onboarding-install"' in response.text
+    assert 'id="onboarding-push"' in response.text
+    assert 'id="device-summary"' in response.text
+    assert 'id="connection-banner"' in response.text
+    assert 'id="dashboard-state"' in response.text
+    assert 'id="next-check"' in response.text
+    assert 'id="ios-install-help"' in response.text
+    assert 'id="android-install-help"' in response.text
+    assert response.text.index('id="onboarding"') < response.text.index('id="monitor-form"')
+
+
+def test_phase_eight_assets_include_accessible_mobile_states(
+    web_client: tuple[TestClient, StubMonitor],
+) -> None:
+    client, _ = web_client
+
+    javascript = client.get("/static/app.js")
+    stylesheet = client.get("/static/style.css")
+
+    assert javascript.status_code == 200
+    assert stylesheet.status_code == 200
+    assert "function configureInstallationExperience()" in javascript.text
+    assert "function updateConnectionState()" in javascript.text
+    assert "Passagem encontrada 🔔" in javascript.text
+    assert "Próxima verificação prevista" in javascript.text
+    assert ':where(a, button, input, select):focus-visible' in stylesheet.text
+    assert '@media (max-width: 600px)' in stylesheet.text
+
+
 def test_catalog_returns_stations_and_classes(web_client: tuple[TestClient, StubMonitor]) -> None:
     client, _ = web_client
 
