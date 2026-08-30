@@ -47,13 +47,17 @@
     </header>
 
     <main class="page-shell">
-      <section class="intro" aria-labelledby="page-title">
+      <section id="browser-intro" class="intro" aria-labelledby="page-title">
         <p class="eyebrow">Seu monitor de passagens</p>
         <h1 id="page-title">Encontre a passagem. A compra continua sendo sua.</h1>
         <p>
           O EFVM Monitor procura a passagem por você e avisa quando aparecer. Ele não reserva
           assento, não compra e não acessa sua conta na Vale.
         </p>
+      </section>
+
+      <section id="pwa-intro" class="intro pwa-intro" aria-labelledby="pwa-title" hidden>
+        <h1 id="pwa-title">Qual o destino de hoje, {{ authenticated_user.name }}?</h1>
       </section>
 
       <section id="onboarding" class="panel onboarding-panel" aria-labelledby="onboarding-title">
