@@ -102,9 +102,15 @@ Trem de Passageiros. O formulário público consulta interfaces HTTP de leitura 
 início de compra; por isso o projeto usa HTTP, e não automação visual. O monitor não usa nem
 persiste token de compra retornado pelo portal.
 
-Essas interfaces não são uma API pública documentada e podem mudar sem aviso. O intervalo mínimo
-aceito é de 60 segundos. Se o portal apresentar CAPTCHA, autenticação, bloqueio ou outra proteção,
-o EFVM Monitor registra e trata a situação sem tentar contorná-la.
+Essas interfaces não são uma API pública documentada e podem mudar sem aviso. Os intervalos
+aceitos são 5, 10, 15 e 30 minutos, 1 hora ou 3 horas, validados também no backend.
+Se o portal apresentar CAPTCHA, autenticação, bloqueio ou outra proteção, o EFVM Monitor
+registra e trata a situação sem tentar contorná-la.
+
+Monitoramentos de viagens passadas são pausados automaticamente na virada do dia seguinte à
+viagem, no fuso `America/Sao_Paulo`. A data da viagem permanece válida durante todo o próprio
+dia. Viagens expiradas não retomam após reinício; o monitor e seu histórico são preservados,
+e somente o usuário decide removê-los pelo fluxo existente.
 
 ## Instalação local
 
