@@ -8,7 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 from efvm_monitor.checker import EFVMClient
-from efvm_monitor.config import Settings
+from efvm_monitor.config import ConfigurationError, Settings, travel_today
 from efvm_monitor.database import (
     LEGACY_USER_ID,
     MonitoringRepository,
@@ -118,6 +118,9 @@ class MonitoringManager:
         user_id: int = LEGACY_USER_ID,
     ) -> MonitorSnapshot:
         monitor = self._require_monitor(monitoring_id, user_id)
+        if monitor.travel_date < travel_today():
+            self.pause(monitoring_id, user_id=user_id)
+            raise ConfigurationError("Essa viagem já expirou. Deseja remover?")
         with self._lock:
             current = self._services.get(monitoring_id)
             if current is not None and current.snapshot().running:
@@ -156,6 +159,9 @@ class MonitoringManager:
     ) -> list[MonitorSnapshot]:
         restored: list[MonitorSnapshot] = []
         for monitor in self.repository.list_all_monitors():
+            if monitor.active and monitor.travel_date < travel_today():
+                restored.append(self.pause(monitor.id, user_id=monitor.user_id))
+                continue
             if not monitor.active:
                 restored.append(self._snapshot_from_monitor(monitor))
                 continue
@@ -189,6 +195,11 @@ class MonitoringManager:
             monitor.id for monitor in self.repository.list_all_monitors() if monitor.active
         }
         with self._lock:
+            self._services = {
+                monitoring_id: service
+                for monitoring_id, service in self._services.items()
+                if service.snapshot().running
+            }
             registered_workers = len(self._services)
             running_ids = {
                 monitoring_id
