@@ -8,9 +8,17 @@ from datetime import date
 
 from dotenv import load_dotenv
 
+ALLOWED_INTERVAL_SECONDS = (300, 600, 900, 1800, 3600, 10800)
+
 
 class ConfigurationError(ValueError):
     """Indica que uma configuração obrigatória é inválida ou está ausente."""
+
+
+def validate_interval(value: int) -> int:
+    if value not in ALLOWED_INTERVAL_SECONDS:
+        raise ConfigurationError("Use um intervalo de 5, 10, 15, 30 minutos, 1 hora ou 3 horas.")
+    return value
 
 
 def _required(name: str) -> str:
@@ -81,6 +89,7 @@ class Settings:
         sms_enabled: bool = False,
         origin_label: str | None = None,
         destination_label: str | None = None,
+        allow_today: bool = False,
     ) -> Settings:
         """Cria uma configuração a partir de dados já recebidos pela aplicação."""
         normalized_origin = origin.strip()
@@ -95,12 +104,13 @@ class Settings:
             raise ConfigurationError("Origem e destino devem ser diferentes.")
         if not normalized_class:
             raise ConfigurationError("A classe é obrigatória.")
-        if travel_date <= date.today():
+        if allow_today and travel_date < date.today():
+            raise ConfigurationError("Essa viagem já expirou. Deseja remover?")
+        if not allow_today and travel_date <= date.today():
             raise ConfigurationError("A data deve ser posterior ao dia atual.")
         if passengers != 1:
             raise ConfigurationError("A Fase 2 permite exatamente 1 passageiro.")
-        if check_interval_seconds < 60:
-            raise ConfigurationError("O intervalo mínimo é de 60 segundos.")
+        validate_interval(check_interval_seconds)
         if not 5 <= timeout_seconds <= 120:
             raise ConfigurationError("O timeout deve ficar entre 5 e 120 segundos.")
         if normalized_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
@@ -159,7 +169,9 @@ class Settings:
             travel_date=travel_date,
             travel_class=os.getenv("EFVM_CLASS", "Econômica").strip() or "Econômica",
             passengers=_integer("EFVM_PASSENGERS", 1, 1, 10),
-            check_interval_seconds=_integer("EFVM_CHECK_INTERVAL_SECONDS", 300, 60),
+            check_interval_seconds=validate_interval(
+                _integer("EFVM_CHECK_INTERVAL_SECONDS", 300, 300)
+            ),
             timeout_seconds=_integer("EFVM_TIMEOUT_SECONDS", 30, 5, 120),
             log_level=log_level,
             base_url=base_url.rstrip("/"),
