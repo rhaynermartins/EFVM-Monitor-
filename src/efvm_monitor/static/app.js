@@ -154,7 +154,7 @@ function setFormError(message = "") {
 function userFacingError(error, fallback) {
   if (!navigator.onLine) return "Você está sem internet. Tente novamente quando a conexão voltar.";
   if (error instanceof TypeError) return fallback;
-  return error.message || fallback;
+  return (error.message || fallback).replace(/\b(monitoramento)\s+#?\d+\b/gi, "$1");
 }
 
 function option(value, label) {
@@ -399,7 +399,7 @@ function renderMonitors(items) {
     heading.className = "monitor-card-heading";
     const identity = document.createElement("span");
     identity.className = "monitor-identity";
-    identity.textContent = `Viagem #${state.monitoring_id}`;
+    identity.textContent = "MONITORAMENTO";
     const badge = document.createElement("span");
     badge.className = `status-badge ${statusClass(visualStatus)}`;
     badge.textContent = statusLabel(state);
@@ -883,7 +883,7 @@ async function resumeMonitor(monitoringId) {
 
 async function removeMonitor(monitoringId) {
   const confirmed = window.confirm(
-    `Remover a viagem #${monitoringId}? Ela deixará de aparecer na sua conta.`,
+    "Remover este monitoramento? Ele deixará de aparecer na sua conta.",
   );
   if (!confirmed) return;
   setFormError();
