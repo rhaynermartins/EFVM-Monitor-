@@ -163,6 +163,15 @@ a {
   margin-bottom: 36px;
 }
 
+body[data-display-context^="mobile-"] .form-panel > .panel-heading .step-label,
+body[data-display-context^="mobile-"] .status-panel > .panel-heading .step-label {
+  display: none;
+}
+
+body[data-display-context="mobile-pwa"] .pwa-intro h1 {
+  overflow-wrap: anywhere;
+}
+
 .eyebrow,
 .step-label {
   margin: 0 0 8px;
