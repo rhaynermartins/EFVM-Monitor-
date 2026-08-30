@@ -1141,6 +1141,42 @@ footer {
   text-underline-offset: 3px;
 }
 
+@media (min-width: 881px) and (display-mode: browser) {
+  body[data-display-context="desktop"] #browser-intro,
+  body[data-display-context="desktop"] #page-title {
+    max-width: none;
+  }
+
+  body[data-display-context="desktop"] .desktop-hero-line {
+    display: block;
+  }
+
+  body[data-display-context="desktop"] .field input[type="date"] {
+    height: 46px;
+    padding: 0 13px;
+    line-height: normal;
+  }
+
+  body[data-display-context="desktop"] .field input[type="date"]::-webkit-date-and-time-value {
+    padding-inline-start: 0;
+  }
+
+  body[data-display-context="desktop"] .field input[type="date"]::-webkit-calendar-picker-indicator {
+    margin-inline-end: 0;
+  }
+
+  body[data-display-context="desktop"] #status-badge {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+
+  body[data-display-context="desktop"] .form-panel > .panel-heading .step-label,
+  body[data-display-context="desktop"] .status-panel > .panel-heading .step-label {
+    display: none;
+  }
+}
+
 @media (max-width: 880px) {
   .content-grid {
     grid-template-columns: 1fr;
