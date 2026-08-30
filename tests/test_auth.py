@@ -85,7 +85,7 @@ def test_registers_with_http_only_cookie_and_persists_session(
     assert verify_password(ACCOUNT["password"], saved_user.password_hash) is True
 
 
-def test_dashboard_uses_authenticated_greeting_only_in_header(
+def test_dashboard_preserves_header_and_adds_hidden_contextual_greeting(
     authenticated_app: tuple[TestClient, MonitoringRepository],
 ) -> None:
     client, _ = authenticated_app
@@ -110,7 +110,21 @@ def test_dashboard_uses_authenticated_greeting_only_in_header(
     assert f"Olá, {long_name}." in header
     assert f"Olá, {long_name}." not in page_body
     assert 'class="user-greeting"' not in response.text
-    assert response.text.count(long_name) == 2
+    assert header.count(long_name) == 2
+    assert f"Qual o destino de hoje, {long_name}?" in page_body
+    assert 'id="pwa-intro" class="intro pwa-intro" aria-labelledby="pwa-title" hidden' in page_body
+
+
+def test_contextual_greeting_escapes_user_supplied_name(
+    authenticated_app: tuple[TestClient, MonitoringRepository],
+) -> None:
+    client, _ = authenticated_app
+    register(client, {**ACCOUNT, "name": "<b>Ana & João</b>"})
+
+    page = client.get("/").text
+
+    assert "Qual o destino de hoje, &lt;b&gt;Ana &amp; João&lt;/b&gt;?" in page
+    assert "Qual o destino de hoje, <b>" not in page
     assert "nome-longo@example.com" not in response.text
 
 
