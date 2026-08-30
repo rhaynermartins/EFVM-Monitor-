@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
 ALLOWED_INTERVAL_SECONDS = (300, 600, 900, 1800, 3600, 10800)
+LOCAL_TIMEZONE = ZoneInfo("America/Sao_Paulo")
+
+
+def travel_today() -> date:
+    return datetime.now(LOCAL_TIMEZONE).date()
 
 
 class ConfigurationError(ValueError):
@@ -104,9 +110,9 @@ class Settings:
             raise ConfigurationError("Origem e destino devem ser diferentes.")
         if not normalized_class:
             raise ConfigurationError("A classe é obrigatória.")
-        if allow_today and travel_date < date.today():
+        if allow_today and travel_date < travel_today():
             raise ConfigurationError("Essa viagem já expirou. Deseja remover?")
-        if not allow_today and travel_date <= date.today():
+        if not allow_today and travel_date <= travel_today():
             raise ConfigurationError("A data deve ser posterior ao dia atual.")
         if passengers != 1:
             raise ConfigurationError("A Fase 2 permite exatamente 1 passageiro.")
