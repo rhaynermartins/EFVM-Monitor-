@@ -73,7 +73,7 @@ def payload(origin: str, destination: str, travel_class: str = "Econômica") -> 
         "travel_date": (date.today() + timedelta(days=10)).isoformat(),
         "travel_class": travel_class,
         "passengers": 1,
-        "interval_seconds": 60,
+        "interval_seconds": 300,
         "whatsapp_enabled": False,
         "sms_enabled": False,
     }
