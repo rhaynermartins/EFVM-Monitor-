@@ -102,7 +102,7 @@ def monitor_payload(origin: str, destination: str) -> dict[str, Any]:
         "travel_date": (date.today() + timedelta(days=10)).isoformat(),
         "travel_class": "Econômica",
         "passengers": 1,
-        "interval_seconds": 60,
+        "interval_seconds": 300,
         "whatsapp_enabled": False,
         "sms_enabled": False,
     }
