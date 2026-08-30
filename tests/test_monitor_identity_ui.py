@@ -14,6 +14,7 @@ APP_JS = Path(__file__).parents[1] / "src/efvm_monitor/static/app.js"
     [
         "card", "confirmation", "cancel", "pause", "resume", "remove", "history",
         "not-found", "already-running", "unrelated-error", "network-error",
+        "expired", "today", "hours",
     ],
 )
 def test_monitor_identity_presentation_and_action_target(scenario: str) -> None:
@@ -24,6 +25,10 @@ def test_monitor_identity_presentation_and_action_target(scenario: str) -> None:
 const assert = require('node:assert/strict');
 const source = require('node:fs').readFileSync(process.argv[1], 'utf8');
 const scenario = process.argv[2];
+class Date extends globalThis.Date {
+  constructor(...args) { super(...(args.length ? args : ['2026-08-31T02:59:59Z'])); }
+  static now() { return new Date().getTime(); }
+}
 // A minimal DOM records rendered text, accessibility labels and actual click handlers.
 class Element {
   constructor() {
@@ -74,9 +79,10 @@ async function refreshState() { refreshes += 1; }
 function renderState(state) { renderedState = state.monitoring_id; }
 function updateOnboarding() {}
 // Execute the real functions, rather than reproducing routing or rendering logic.
-const names = ['setFormError', 'userFacingError', 'statusClass', 'statusLabel',
+const names = ['setFormError', 'userFacingError', 'statusClass', 'statusLabel', 'isTravelExpired',
   'friendlyStatusMessage', 'stationName', 'formatTravelDate', 'formatInterval',
-  'formatDateTime', 'monitorAction', 'renderMonitors', 'renderHistory', 'loadHistory',
+  'formatDateTime', 'nextCheckMessage', 'monitorAction', 'renderMonitors', 'renderHistory',
+  'loadHistory',
   'pauseMonitor', 'resumeMonitor', 'removeMonitor'];
 eval(names.map(name => {
   const match = source.match(new RegExp('(?:async )?function ' + name + '\\([^]*?\\n}'));
@@ -84,7 +90,8 @@ eval(names.map(name => {
   return match[0];
 }).join('\n'));
 const state = (id, running) => ({monitoring_id: id, running, status: 'SEM_VAGA',
-  query: {origin: '1', destination: '2', travel_date: '2026-09-15',
+  query: {origin: '1', destination: '2', travel_date: scenario === 'expired' ? '2026-08-29'
+    : scenario === 'today' ? '2026-08-30' : '2026-09-15',
     travel_class: 'Econômica', check_interval_seconds: 60}});
 renderMonitors([state(firstId, true), state(targetId, scenario !== 'resume')]);
 const cards = elements.monitorsList.children;
@@ -100,6 +107,34 @@ cards.forEach(card => {
   assertNoVisibleIds(card);
 });
 (async () => {
+  if (scenario === 'hours') {
+    assert.equal(formatInterval(300), '5 minutos');
+    assert.equal(formatInterval(900), '15 minutos');
+    assert.equal(formatInterval(3600), '1 hora');
+    assert.equal(formatInterval(10800), '3 horas');
+    return;
+  }
+  if (['expired', 'today'].includes(scenario)) {
+    const labels = cards[1].children.at(-1).children.map(x => x.textContent);
+    assert.ok(labels.includes('Remover'));
+    assert.ok(labels.includes('Ver histórico'));
+    assert.equal(labels.includes('Pausar'), scenario === 'today');
+    assert.equal(labels.includes('Retomar'), false);
+    assert.equal(isTravelExpired(state(targetId, true)), scenario === 'expired');
+    if (scenario === 'expired') {
+      assert.equal(cards[1].dataset.state, 'parado');
+      assert.ok(cards[1].textContent.includes('Essa viagem já expirou. Deseja remover?'));
+      assert.equal(statusLabel(state(targetId, true)), 'Expirado');
+      assert.equal(nextCheckMessage(state(targetId, true)),
+        'Próxima verificação: viagem expirada.');
+    }
+    const historyButton = cards[1].children.at(-1).children.find(
+      x => x.textContent === 'Ver histórico');
+    await historyButton.events.click();
+    assert.equal(calls[0].url, `/api/monitoramentos/${targetId}/historico?limit=10`);
+    assert.ok(elements.historyList.textContent.includes('Nenhuma vaga encontrada'));
+    return;
+  }
   if (scenario === 'card') return;
   const label = scenario === 'history' ? 'Ver histórico'
     : scenario === 'resume' ? 'Retomar'
