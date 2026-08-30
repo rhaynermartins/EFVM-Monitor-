@@ -248,7 +248,16 @@ function statusIcon(status) {
   }[status] || "?";
 }
 
+function isTravelExpired(state) {
+  if (!state.query?.travel_date) return false;
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en", {
+    timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date()).map(({ type, value }) => [type, value]));
+  return state.query.travel_date < `${parts.year}-${parts.month}-${parts.day}`;
+}
+
 function statusLabel(state) {
+  if (isTravelExpired(state)) return "Expirado";
   if (!state.running) return "Pausado";
   return {
     AGUARDANDO: "Iniciando",
@@ -260,6 +269,7 @@ function statusLabel(state) {
 }
 
 function friendlyStatusMessage(state) {
+  if (isTravelExpired(state)) return "Essa viagem já expirou. Deseja remover?";
   if (!state.running) return "Este monitor está pausado e não fará novas consultas.";
   return {
     AGUARDANDO: "A primeira consulta será feita em instantes.",
@@ -281,6 +291,10 @@ function formatTravelDate(value) {
 }
 
 function formatInterval(seconds) {
+  if (seconds >= 3600 && seconds % 3600 === 0) {
+    const hours = seconds / 3600;
+    return `${hours} ${hours === 1 ? "hora" : "horas"}`;
+  }
   if (seconds < 60) return `${seconds} segundos`;
   const minutes = Math.round(seconds / 60);
   return `${minutes} ${minutes === 1 ? "minuto" : "minutos"}`;
@@ -296,6 +310,7 @@ function formatDateTime(value) {
 }
 
 function nextCheckMessage(state) {
+  if (isTravelExpired(state)) return "Próxima verificação: viagem expirada.";
   if (!state.running) return "Próxima verificação: monitor pausado.";
   if (!state.checked_at) return "Próxima verificação: assim que a primeira consulta começar.";
   const intervalSeconds = Number(state.query?.check_interval_seconds || 0);
@@ -344,7 +359,7 @@ function renderQuery(query) {
 
 function renderState(state) {
   elements.currentMonitorDetail.hidden = false;
-  const visualStatus = state.running ? state.status : "PARADO";
+  const visualStatus = state.running && !isTravelExpired(state) ? state.status : "PARADO";
   elements.currentMonitorDetail.dataset.state = visualStatus.toLowerCase().replaceAll("_", "-");
   elements.statusIcon.textContent = statusIcon(visualStatus);
   elements.statusMessage.textContent = friendlyStatusMessage(state);
@@ -383,12 +398,12 @@ function renderMonitors(items) {
   elements.monitorsList.setAttribute("aria-busy", "false");
   elements.statusBadge.textContent = `${items.length} ${items.length === 1 ? "MONITOR" : "MONITORES"}`;
   elements.statusBadge.className = `status-badge ${
-    items.some((item) => item.running) ? "status-aguardando" : "status-parado"
+    items.some((item) => item.running && !isTravelExpired(item)) ? "status-aguardando" : "status-parado"
   }`;
 
   items.forEach((state) => {
     const routeLabel = `${stationName(state.query.origin)} para ${stationName(state.query.destination)}`;
-    const visualStatus = state.running ? state.status : "PARADO";
+    const visualStatus = state.running && !isTravelExpired(state) ? state.status : "PARADO";
     const card = document.createElement("article");
     card.className = "monitor-card";
     card.dataset.state = visualStatus.toLowerCase().replaceAll("_", "-");
@@ -433,7 +448,7 @@ function renderMonitors(items) {
         `Ver histórico da viagem de ${routeLabel}`,
       ),
     );
-    if (state.running) {
+    if (state.running && !isTravelExpired(state)) {
       actions.append(
         monitorAction(
           "Pausar",
@@ -442,7 +457,7 @@ function renderMonitors(items) {
           `Pausar a viagem de ${routeLabel}`,
         ),
       );
-    } else {
+    } else if (!isTravelExpired(state)) {
       actions.append(
         monitorAction(
           "Retomar",
