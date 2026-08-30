@@ -7,11 +7,11 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from efvm_monitor.checker import AvailabilityStatus, EFVMClient
-from efvm_monitor.config import Settings
+from efvm_monitor.config import LOCAL_TIMEZONE, ConfigurationError, Settings, travel_today
 from efvm_monitor.database import (
     LEGACY_USER_ID,
     MonitoringRepository,
@@ -75,6 +75,8 @@ class MonitorService:
         monitoring_id: int | None = None,
         user_id: int = LEGACY_USER_ID,
     ) -> MonitorSnapshot:
+        if settings.travel_date < travel_today():
+            raise ConfigurationError("Essa viagem já expirou. Deseja remover?")
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 raise MonitorAlreadyRunning("Já existe um monitoramento em execução.")
@@ -161,7 +163,13 @@ class MonitorService:
         monitor: PersistedMonitor,
         settings: Settings | None = None,
     ) -> MonitorSnapshot:
-        if monitor.active:
+        if monitor.travel_date < travel_today() and monitor.active:
+            if self._repository is not None:
+                self._repository.set_status(monitor.id, MonitorStatus.PAUSED)
+            settings = None
+            restored_status = "PARADO"
+            restored_message = "Essa viagem já expirou. Deseja remover?"
+        elif monitor.active:
             if settings is not None:
                 return self.start(
                     settings,
@@ -214,8 +222,12 @@ class MonitorService:
         try:
             while not stop_event.is_set():
                 try:
+                    if self._expire_if_needed(settings):
+                        break
                     with self._client_factory(settings) as client:
                         while not stop_event.is_set():
+                            if self._expire_if_needed(settings):
+                                break
                             started_at = time.monotonic()
                             result = client.check()
                             checked_at = self._set_result(
@@ -260,7 +272,7 @@ class MonitorService:
                                         },
                                     )
                             previous_status = result.status
-                            if stop_event.wait(settings.check_interval_seconds):
+                            if self._wait_for_next_check(settings, stop_event):
                                 break
                 except Exception as exc:
                     if stop_event.is_set():
@@ -286,7 +298,7 @@ class MonitorService:
                             },
                         )
                         self._set_runtime_error(str(exc), monitoring_id)
-                    if stop_event.wait(settings.check_interval_seconds):
+                    if self._wait_for_next_check(settings, stop_event):
                         break
         finally:
             with self._lock:
@@ -300,6 +312,30 @@ class MonitorService:
                     availability_changed_at=self._snapshot.availability_changed_at,
                     query=self._snapshot.query,
                 )
+
+    def _expire_if_needed(self, settings: Settings) -> bool:
+        if settings.travel_date >= travel_today():
+            return False
+        self.stop()
+        LOGGER.info(
+            "Viagem expirada; monitoramento pausado automaticamente.",
+            extra={
+                "event": "monitor_expired",
+                "monitoring_id": self._snapshot.monitoring_id,
+                "user_id": self._user_id,
+            },
+        )
+        return True
+
+    @staticmethod
+    def _wait_for_next_check(settings: Settings, stop_event: threading.Event) -> bool:
+        expires_at = datetime.combine(
+            settings.travel_date + timedelta(days=1),
+            datetime.min.time(),
+            tzinfo=LOCAL_TIMEZONE,
+        )
+        remaining = max(0.0, (expires_at - datetime.now(LOCAL_TIMEZONE)).total_seconds())
+        return stop_event.wait(min(settings.check_interval_seconds, remaining))
 
     def _set_result(
         self,
