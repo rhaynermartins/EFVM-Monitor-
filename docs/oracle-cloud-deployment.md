@@ -106,7 +106,10 @@ dos demais. O healthcheck detalhado permite detectar divergências que não se r
 
 Por padrão, cada usuário pode manter até 10 monitoramentos visíveis. Remover logicamente um
 monitor libera espaço. O valor pode ser ajustado entre 1 e 100 por
-`EFVM_MAX_MONITORS_PER_USER`, sem reduzir o intervalo mínimo de consulta de 60 segundos.
+`EFVM_MAX_MONITORS_PER_USER`, sem reduzir o intervalo mínimo de consulta de 5 minutos.
+Os intervalos permitidos são 5, 10, 15 e 30 minutos, 1 hora e 3 horas. O worker pausa viagens
+expiradas após o fim da data da viagem em `America/Sao_Paulo`, sem apagar histórico. A
+restauração também pausa viagens passadas em vez de iniciar seus workers.
 Tentativas de login, criação repetitiva e testes de Web Push também usam janelas temporárias em
 memória. Respostas limitadas usam HTTP `429` e `Retry-After`; nenhum bloqueio é permanente.
 
