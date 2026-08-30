@@ -93,6 +93,7 @@ class PersistedMonitor:
             sms_enabled=self.sms_enabled,
             origin_label=self.origin_label,
             destination_label=self.destination_label,
+            allow_today=True,
         )
 
 
