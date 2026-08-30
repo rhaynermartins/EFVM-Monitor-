@@ -1,6 +1,8 @@
 "use strict";
 
 const elements = {
+  browserIntro: document.querySelector("#browser-intro"),
+  pwaIntro: document.querySelector("#pwa-intro"),
   connectionBanner: document.querySelector("#connection-banner"),
   form: document.querySelector("#monitor-form"),
   origin: document.querySelector("#origin"),
@@ -69,6 +71,7 @@ let pushLifecycleState = "checking";
 let refreshInProgress = false;
 const pushDeviceId = getPushDeviceId();
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
+const defaultMonitorsEmptyText = elements.monitorsEmpty.textContent;
 
 function getPushDeviceId() {
   const storageKey = "efvm-push-device-id";
@@ -544,6 +547,24 @@ function isStandalone() {
     window.navigator.standalone === true;
 }
 
+function isMobileDevice() {
+  return isIos() || isAndroid() || window.navigator.userAgentData?.mobile === true ||
+    /mobile/i.test(window.navigator.userAgent);
+}
+
+function updateDisplayContext() {
+  const mobile = isMobileDevice();
+  // Installed elsewhere does not mean this browser window is running standalone.
+  const mobilePwa = mobile && isStandalone();
+  document.body.dataset.displayContext = mobile ? (mobilePwa ? "mobile-pwa" : "mobile-browser") : "desktop";
+  if (elements.browserIntro) elements.browserIntro.hidden = mobilePwa;
+  if (elements.pwaIntro) elements.pwaIntro.hidden = !mobilePwa;
+  elements.onboarding.hidden = mobilePwa;
+  elements.monitorsEmpty.textContent = mobile
+    ? "Você ainda não acompanha nenhuma viagem. Configure a viagem acima para criar seu primeiro monitor."
+    : defaultMonitorsEmptyText;
+}
+
 function notificationPermission() {
   return "Notification" in window ? Notification.permission : "unsupported";
 }
@@ -605,18 +626,22 @@ function updateOnboarding() {
     ? "Alertas ativos neste dispositivo."
     : notificationPermission() === "denied"
       ? "As notificações estão bloqueadas nas configurações."
-      : "Ative o Web Push no Passo 1 para receber alertas.";
+      : isMobileDevice()
+        ? "Ative o Web Push no card da viagem para receber alertas."
+        : "Ative o Web Push no Passo 1 para receber alertas.";
   updateDeviceSummary();
 }
 
 function configureInstallationExperience() {
+  updateDisplayContext();
   appInstalled = appInstalled || isStandalone();
+  const installedHere = isMobileDevice() ? isStandalone() : appInstalled;
   elements.iosInstallHelp.hidden = true;
   elements.androidInstallHelp.hidden = true;
   elements.desktopInstallHelp.hidden = true;
-  elements.installApp.hidden = !deferredInstallPrompt || appInstalled;
+  elements.installApp.hidden = !deferredInstallPrompt || installedHere;
 
-  if (appInstalled) {
+  if (installedHere) {
     elements.installTitle.textContent = "Aplicativo instalado";
     elements.installStatus.textContent = "O EFVM já está pronto neste dispositivo.";
   } else if (isIos()) {
@@ -927,6 +952,8 @@ window.addEventListener("appinstalled", () => {
 
 window.addEventListener("offline", updateConnectionState);
 window.addEventListener("online", updateConnectionState);
+window.addEventListener("pageshow", configureInstallationExperience);
+window.matchMedia("(display-mode: standalone)").addEventListener("change", configureInstallationExperience);
 
 configureInstallationExperience();
 updateConnectionState();
