@@ -1152,9 +1152,17 @@ footer {
   }
 
   body[data-display-context="desktop"] .field input[type="date"] {
-    height: 46px;
+    height: auto;
     padding: 0 13px;
     line-height: normal;
+  }
+
+  @supports (font: -apple-system-body) {
+    body[data-display-context="desktop"] .field input[type="date"] {
+      /* Keep Safari's native size instead of the shared minimum and grid stretch. */
+      min-height: revert;
+      align-self: end;
+    }
   }
 
   body[data-display-context="desktop"] .field input[type="date"]::-webkit-date-and-time-value {
