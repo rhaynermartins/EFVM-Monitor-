@@ -31,7 +31,7 @@ from efvm_monitor.auth import (
 )
 from efvm_monitor.checker import EFVMClient, PortalError
 from efvm_monitor.cli import _configure_logging
-from efvm_monitor.config import ConfigurationError, Settings
+from efvm_monitor.config import ConfigurationError, Settings, validate_interval
 from efvm_monitor.database import LEGACY_USER_ID, MonitoringRepository, PersistedMonitor
 from efvm_monitor.manager import (
     MonitoringLimitReached,
@@ -82,10 +82,15 @@ class MonitoringRequest(BaseModel):
     travel_date: date
     travel_class: Literal["Econômica", "Executiva"]
     passengers: Literal[1] = 1
-    interval_seconds: int = Field(default=300, ge=60, le=86_400)
+    interval_seconds: int = Field(default=300, ge=300, le=10_800)
     whatsapp_enabled: bool = False
     sms_enabled: bool = False
     push_device_id: str | None = Field(default=None, min_length=16, max_length=128)
+
+    @field_validator("interval_seconds")
+    @classmethod
+    def allowed_interval(cls, value: int) -> int:
+        return validate_interval(value)
 
 
 class PushKeysRequest(BaseModel):
