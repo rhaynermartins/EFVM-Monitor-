@@ -113,6 +113,7 @@ def test_dashboard_preserves_header_and_adds_hidden_contextual_greeting(
     assert header.count(long_name) == 2
     assert f"Qual o destino de hoje, {long_name}?" in page_body
     assert 'id="pwa-intro" class="intro pwa-intro" aria-labelledby="pwa-title" hidden' in page_body
+    assert "nome-longo@example.com" not in response.text
 
 
 def test_contextual_greeting_escapes_user_supplied_name(
@@ -125,7 +126,6 @@ def test_contextual_greeting_escapes_user_supplied_name(
 
     assert "Qual o destino de hoje, &lt;b&gt;Ana &amp; João&lt;/b&gt;?" in page
     assert "Qual o destino de hoje, <b>" not in page
-    assert "nome-longo@example.com" not in response.text
 
 
 def test_rejects_state_changes_without_valid_csrf(
