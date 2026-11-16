@@ -18,7 +18,12 @@ from dotenv import load_dotenv
 from py_vapid import Vapid
 
 from efvm_monitor.checker import AvailabilityResult, AvailabilityStatus, EFVMClient
-from efvm_monitor.config import ConfigurationError, Settings
+from efvm_monitor.config import (
+    MONITORING_PAUSED_MESSAGE,
+    ConfigurationError,
+    Settings,
+    vale_monitoring_paused,
+)
 from efvm_monitor.notifier import (
     NotificationSendError,
     NotificationService,
@@ -199,6 +204,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
+        if vale_monitoring_paused():
+            print(f"ERRO | {MONITORING_PAUSED_MESSAGE}", file=sys.stderr)
+            return EXIT_CODES[AvailabilityStatus.ERRO]
         settings = Settings.from_env(args.env_file)
     except ConfigurationError as exc:
         print(f"ERRO | {exc}", file=sys.stderr)
