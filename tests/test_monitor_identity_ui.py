@@ -14,7 +14,7 @@ APP_JS = Path(__file__).parents[1] / "src/efvm_monitor/static/app.js"
     [
         "card", "confirmation", "cancel", "pause", "resume", "remove", "history",
         "not-found", "already-running", "unrelated-error", "network-error",
-        "expired", "today", "hours",
+        "expired", "today", "hours", "maintenance",
     ],
 )
 def test_monitor_identity_presentation_and_action_target(scenario: str) -> None:
@@ -56,7 +56,10 @@ let confirmation;
 const window = {confirm: text => { confirmation = text; return scenario !== 'cancel'; }};
 const firstId = 765432;
 const targetId = 984321;
-const stationsById = new Map([['1', 'Belo Horizonte'], ['2', 'Dois Irmãos']]);
+const monitoringPaused = scenario === 'maintenance';
+const stationsById = new Map(monitoringPaused ? [] : [
+  ['1', 'Belo Horizonte'], ['2', 'Dois Irmãos'],
+]);
 let selectedMonitorId = targetId;
 let currentMonitors = [];
 let renderedState;
@@ -90,10 +93,13 @@ eval(names.map(name => {
   return match[0];
 }).join('\n'));
 const state = (id, running) => ({monitoring_id: id, running, status: 'SEM_VAGA',
-  query: {origin: '1', destination: '2', travel_date: scenario === 'expired' ? '2026-08-29'
+  query: {origin: '1', destination: '2', origin_label: 'Belo Horizonte',
+    destination_label: 'Dois Irmãos', travel_date: scenario === 'expired' ? '2026-08-29'
     : scenario === 'today' ? '2026-08-30' : '2026-09-15',
     travel_class: 'Econômica', check_interval_seconds: 60}});
-renderMonitors([state(firstId, true), state(targetId, scenario !== 'resume')]);
+renderMonitors([
+  state(firstId, !monitoringPaused), state(targetId, !monitoringPaused && scenario !== 'resume'),
+]);
 const cards = elements.monitorsList.children;
 function assertNoVisibleIds(element) {
   for (const id of [firstId, targetId]) {
@@ -107,6 +113,18 @@ cards.forEach(card => {
   assertNoVisibleIds(card);
 });
 (async () => {
+  if (monitoringPaused) {
+    assert.equal(cards[1].dataset.state, 'parado');
+    assert.ok(cards[1].textContent.includes('Suspenso'));
+    assert.ok(cards[1].textContent.includes('Belo Horizonte → Dois Irmãos'));
+    assert.ok(!cards[1].textContent.includes('Sem vagas'));
+    const actions = cards[1].children.at(-1).children;
+    assert.ok(!actions.some(x => ['Retomar', 'Pausar'].includes(x.textContent)));
+    await actions.find(x => x.textContent === 'Ver histórico').events.click();
+    assert.equal(calls[0].url, `/api/monitoramentos/${targetId}/historico?limit=10`);
+    assert.ok(elements.historyList.textContent.includes('Nenhuma vaga encontrada'));
+    return;
+  }
   if (scenario === 'hours') {
     assert.equal(formatInterval(300), '5 minutos');
     assert.equal(formatInterval(900), '15 minutos');
