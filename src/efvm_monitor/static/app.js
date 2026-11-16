@@ -71,6 +71,7 @@ let pushLifecycleState = "checking";
 let refreshInProgress = false;
 const pushDeviceId = getPushDeviceId();
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
+const monitoringPaused = document.body.dataset.monitoringPaused === "true";
 const defaultMonitorsEmptyText = elements.monitorsEmpty.textContent;
 
 function getPushDeviceId() {
@@ -182,6 +183,10 @@ function selectDefault(select, items, expectedName) {
 }
 
 async function loadCatalog() {
+  if (monitoringPaused) {
+    setControls();
+    return;
+  }
   try {
     const catalog = await fetchJson("/api/catalogo");
     stationsById = new Map(catalog.stations.map((station) => [String(station.id), station.name]));
@@ -258,6 +263,7 @@ function isTravelExpired(state) {
 
 function statusLabel(state) {
   if (isTravelExpired(state)) return "Expirado";
+  if (monitoringPaused) return "Suspenso";
   if (!state.running) return "Pausado";
   return {
     AGUARDANDO: "Iniciando",
@@ -270,6 +276,7 @@ function statusLabel(state) {
 
 function friendlyStatusMessage(state) {
   if (isTravelExpired(state)) return "Essa viagem já expirou. Deseja remover?";
+  if (monitoringPaused) return "As consultas à Vale estão temporariamente suspensas.";
   if (!state.running) return "Este monitor está pausado e não fará novas consultas.";
   return {
     AGUARDANDO: "A primeira consulta será feita em instantes.",
@@ -280,8 +287,8 @@ function friendlyStatusMessage(state) {
   }[state.status] || "O monitor está acompanhando esta viagem.";
 }
 
-function stationName(id) {
-  return stationsById.get(String(id)) || String(id);
+function stationName(id, savedLabel) {
+  return stationsById.get(String(id)) || savedLabel || String(id);
 }
 
 function formatTravelDate(value) {
@@ -311,6 +318,7 @@ function formatDateTime(value) {
 
 function nextCheckMessage(state) {
   if (isTravelExpired(state)) return "Próxima verificação: viagem expirada.";
+  if (monitoringPaused) return "Próxima verificação: aguardando a retomada da integração.";
   if (!state.running) return "Próxima verificação: monitor pausado.";
   if (!state.checked_at) return "Próxima verificação: assim que a primeira consulta começar.";
   const intervalSeconds = Number(state.query?.check_interval_seconds || 0);
@@ -346,7 +354,7 @@ function renderQuery(query) {
   currentQuery = query;
   elements.querySummary.hidden = !query;
   if (!query) return;
-  elements.summaryRoute.textContent = `${stationName(query.origin)} → ${stationName(query.destination)}`;
+  elements.summaryRoute.textContent = `${stationName(query.origin, query.origin_label)} → ${stationName(query.destination, query.destination_label)}`;
   const passengers = Number(query.passengers || 1);
   elements.summaryDateClass.textContent = `${formatTravelDate(query.travel_date)} · ${query.travel_class} · ${passengers} ${passengers === 1 ? "passageiro" : "passageiros"}`;
   elements.summaryInterval.textContent = formatInterval(query.check_interval_seconds);
@@ -359,7 +367,7 @@ function renderQuery(query) {
 
 function renderState(state) {
   elements.currentMonitorDetail.hidden = false;
-  const visualStatus = state.running && !isTravelExpired(state) ? state.status : "PARADO";
+  const visualStatus = !monitoringPaused && state.running && !isTravelExpired(state) ? state.status : "PARADO";
   elements.currentMonitorDetail.dataset.state = visualStatus.toLowerCase().replaceAll("_", "-");
   elements.statusIcon.textContent = statusIcon(visualStatus);
   elements.statusMessage.textContent = friendlyStatusMessage(state);
@@ -402,8 +410,10 @@ function renderMonitors(items) {
   }`;
 
   items.forEach((state) => {
-    const routeLabel = `${stationName(state.query.origin)} para ${stationName(state.query.destination)}`;
-    const visualStatus = state.running && !isTravelExpired(state) ? state.status : "PARADO";
+    const origin = stationName(state.query.origin, state.query.origin_label);
+    const destination = stationName(state.query.destination, state.query.destination_label);
+    const routeLabel = `${origin} para ${destination}`;
+    const visualStatus = !monitoringPaused && state.running && !isTravelExpired(state) ? state.status : "PARADO";
     const card = document.createElement("article");
     card.className = "monitor-card";
     card.dataset.state = visualStatus.toLowerCase().replaceAll("_", "-");
@@ -422,7 +432,7 @@ function renderMonitors(items) {
 
     const route = document.createElement("strong");
     route.className = "monitor-route";
-    route.textContent = `${stationName(state.query.origin)} → ${stationName(state.query.destination)}`;
+    route.textContent = `${origin} → ${destination}`;
     const meta = document.createElement("p");
     meta.className = "monitor-meta";
     meta.textContent = `${formatTravelDate(state.query.travel_date)} · ${state.query.travel_class} · 1 passageiro · a cada ${formatInterval(state.query.check_interval_seconds)}`;
@@ -457,7 +467,7 @@ function renderMonitors(items) {
           `Pausar a viagem de ${routeLabel}`,
         ),
       );
-    } else if (!isTravelExpired(state)) {
+    } else if (!monitoringPaused && !isTravelExpired(state)) {
       actions.append(
         monitorAction(
           "Retomar",
