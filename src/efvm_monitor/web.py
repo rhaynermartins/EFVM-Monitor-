@@ -31,7 +31,13 @@ from efvm_monitor.auth import (
 )
 from efvm_monitor.checker import EFVMClient, PortalError
 from efvm_monitor.cli import _configure_logging
-from efvm_monitor.config import ConfigurationError, Settings, validate_interval
+from efvm_monitor.config import (
+    MONITORING_PAUSED_MESSAGE,
+    ConfigurationError,
+    Settings,
+    vale_monitoring_paused,
+    validate_interval,
+)
 from efvm_monitor.database import LEGACY_USER_ID, MonitoringRepository, PersistedMonitor
 from efvm_monitor.manager import (
     MonitoringLimitReached,
@@ -47,9 +53,7 @@ LOGGER = logging.getLogger(__name__)
 PACKAGE_DIRECTORY = Path(__file__).parent
 templates = Jinja2Templates(directory=PACKAGE_DIRECTORY / "templates")
 SESSION_COOKIE = "efvm_session"
-OFFICIAL_PORTAL_URL = (
-    "https://tremdepassageiros.vale.com/sgpweb/portal/index.html#/home"
-)
+OFFICIAL_PORTAL_URL = "https://tremdepassageiros.vale.com/"
 LOGIN_ATTEMPT_LIMIT = 10
 LOGIN_WINDOW_SECONDS = 5 * 60
 MONITOR_CREATION_LIMIT = 10
@@ -212,6 +216,7 @@ def create_app(
     notification_service: NotificationService | None = None,
     authentication_enabled: bool = True,
 ) -> FastAPI:
+    monitoring_paused = vale_monitoring_paused()
     storage = repository or (manager.repository if manager is not None else None)
     if storage is None and monitor is None:
         storage = MonitoringRepository(
@@ -236,6 +241,13 @@ def create_app(
         )
     provide_catalog = catalog_provider or CatalogCache().get
 
+    def ensure_monitoring_available() -> None:
+        if monitoring_paused:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=MONITORING_PAUSED_MESSAGE,
+            )
+
     def snapshots(user_id: int = LEGACY_USER_ID) -> list[MonitorSnapshot]:
         if manager_service is not None:
             return manager_service.list(user_id=user_id)
@@ -252,6 +264,7 @@ def create_app(
     async def lifespan(_: FastAPI):
         if storage is not None:
             storage.initialize()
+        if storage is not None and not monitoring_paused:
             if manager_service is not None:
                 manager_service.restore_all(_settings_from_monitor)
             else:
@@ -395,7 +408,7 @@ def create_app(
                 content={"status": "degraded", "database": "unavailable"},
             )
         if manager_service is not None:
-            manager_status = manager_service.operational_status()
+            manager_status = manager_service.operational_status(monitoring_paused=monitoring_paused)
         else:
             legacy_snapshot = (
                 monitor_service.snapshot() if monitor_service is not None else MonitorSnapshot()
@@ -419,6 +432,8 @@ def create_app(
         }
         if details or response_status != status.HTTP_200_OK:
             content["manager"] = manager_status
+        if details:
+            content["integrations"] = {"vale": "suspended" if monitoring_paused else "enabled"}
         return JSONResponse(status_code=response_status, content=content)
 
     @application.get("/login", response_class=HTMLResponse)
@@ -545,6 +560,7 @@ def create_app(
             context={
                 "minimum_date": (date.today() + timedelta(days=1)).isoformat(),
                 "official_portal_url": OFFICIAL_PORTAL_URL,
+                "monitoring_paused": monitoring_paused,
                 "whatsapp_configured": (
                     notifications.whatsapp_configured and not authentication_enabled
                 ),
@@ -675,6 +691,7 @@ def create_app(
 
     @application.get("/api/catalogo")
     def catalog() -> dict[str, Any]:
+        ensure_monitoring_available()
         try:
             return provide_catalog()
         except (httpx.HTTPError, PortalError, ConfigurationError, ValueError) as exc:
@@ -692,6 +709,7 @@ def create_app(
         payload: MonitoringRequest,
         session: AuthenticatedSession,
     ) -> dict[str, Any]:
+        ensure_monitoring_available()
         enforce_rate_limit(
             f"monitor-create:{session.user_id}",
             limit=MONITOR_CREATION_LIMIT,
@@ -821,6 +839,7 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Monitoramento {monitoring_id} não encontrado.",
             )
+        ensure_monitoring_available()
         try:
             return active_manager.resume(
                 monitoring_id,
