@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 ALLOWED_INTERVAL_SECONDS = (300, 600, 900, 1800, 3600, 10800)
 LOCAL_TIMEZONE = ZoneInfo("America/Sao_Paulo")
+MONITORING_PAUSED_MESSAGE = "Monitoramento temporariamente indisponível."
 
 
 def travel_today() -> date:
@@ -54,6 +55,10 @@ def _boolean(name: str, default: bool) -> bool:
     if raw_value in {"0", "false", "não", "nao", "no", "off"}:
         return False
     raise ConfigurationError(f"{name} deve ser verdadeiro ou falso.")
+
+
+def vale_monitoring_paused() -> bool:
+    return _boolean("EFVM_VALE_MONITORING_PAUSED", False)
 
 
 @dataclass(frozen=True, slots=True)
