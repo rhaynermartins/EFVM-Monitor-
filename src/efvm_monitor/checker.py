@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from efvm_monitor.config import Settings
+from efvm_monitor.config import MONITORING_PAUSED_MESSAGE, Settings, vale_monitoring_paused
 from efvm_monitor.network import vale_ssl_context
 
 LOGGER = logging.getLogger(__name__)
@@ -184,6 +184,8 @@ class EFVMClient:
         }
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if vale_monitoring_paused():
+            raise PortalError(MONITORING_PAUSED_MESSAGE)
         LOGGER.debug("Consultando endpoint público %s", path)
         response = self._client.post(path, json=payload)
         response.raise_for_status()
