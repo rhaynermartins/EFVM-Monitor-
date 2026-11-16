@@ -13,11 +13,18 @@
     <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
     <script defer src="{{ url_for('static', path='/app.js') }}"></script>
   </head>
-  <body data-minimum-date="{{ minimum_date }}">
+  <body data-minimum-date="{{ minimum_date }}" data-monitoring-paused="{{ 'true' if monitoring_paused else 'false' }}">
     <div id="connection-banner" class="connection-banner" role="status" hidden>
       Você está sem internet. Seus monitores continuam no servidor e a tela será atualizada
       quando a conexão voltar.
     </div>
+    {% if monitoring_paused %}
+      <div class="connection-banner" role="status">
+        Monitoramento temporariamente indisponível. A Vale atualizou seu sistema de passagens e
+        estamos adaptando a integração. Você pode consultar passagens diretamente pelo
+        <a href="{{ official_portal_url }}">site oficial</a>.
+      </div>
+    {% endif %}
     <header class="site-header">
       <div class="header-content">
         <a class="brand" href="/" aria-label="Página inicial do EFVM Monitor">
@@ -51,8 +58,12 @@
         <p class="eyebrow">Seu monitor de passagens</p>
         <h1 id="page-title">Encontre a passagem. <span class="desktop-hero-line">A compra continua sendo sua.</span></h1>
         <p>
-          O EFVM Monitor procura a passagem por você e avisa quando aparecer. Ele não reserva
-          assento, não compra e não acessa sua conta na Vale.
+          {% if monitoring_paused %}
+            Seus monitoramentos e históricos continuam disponíveis para consulta.
+          {% else %}
+            O EFVM Monitor procura a passagem por você e avisa quando aparecer. Ele não reserva
+            assento, não compra e não acessa sua conta na Vale.
+          {% endif %}
         </p>
       </section>
 
@@ -154,7 +165,9 @@
               <p class="step-label">Passo 1</p>
               <h2 id="form-title">Configure a viagem</h2>
             </div>
-            <span id="catalog-state" class="catalog-state" role="status">Carregando opções…</span>
+            <span id="catalog-state" class="catalog-state" role="status">
+              {{ 'Consulta suspensa' if monitoring_paused else 'Carregando opções…' }}
+            </span>
           </div>
 
           <form id="monitor-form">
@@ -162,14 +175,14 @@
               <label class="field">
                 <span>Origem</span>
                 <select id="origin" name="origin" required disabled>
-                  <option value="">Carregando estações…</option>
+                  <option value="">{{ 'Opções indisponíveis' if monitoring_paused else 'Carregando estações…' }}</option>
                 </select>
               </label>
 
               <label class="field">
                 <span>Destino</span>
                 <select id="destination" name="destination" required disabled>
-                  <option value="">Carregando estações…</option>
+                  <option value="">{{ 'Opções indisponíveis' if monitoring_paused else 'Carregando estações…' }}</option>
                 </select>
               </label>
 
@@ -181,7 +194,7 @@
               <label class="field">
                 <span>Classe</span>
                 <select id="travel-class" name="travel_class" required disabled>
-                  <option value="">Carregando classes…</option>
+                  <option value="">{{ 'Opções indisponíveis' if monitoring_paused else 'Carregando classes…' }}</option>
                 </select>
               </label>
 
@@ -282,8 +295,8 @@
             Carregando seus monitoramentos…
           </p>
           <p id="monitors-empty" class="monitors-empty" hidden>
-            Você ainda não acompanha nenhuma viagem. Preencha o Passo 1 para criar seu primeiro
-            monitor.
+            Você ainda não acompanha nenhuma viagem.
+            {% if not monitoring_paused %}Preencha o Passo 1 para criar seu primeiro monitor.{% endif %}
           </p>
           <div
             id="monitors-list"
