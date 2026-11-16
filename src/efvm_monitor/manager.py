@@ -189,7 +189,7 @@ class MonitoringManager:
                     restored.append(self._snapshot_from_monitor(recovered, message=str(exc)))
         return restored
 
-    def operational_status(self) -> dict[str, Any]:
+    def operational_status(self, *, monitoring_paused: bool = False) -> dict[str, Any]:
         """Resume a correspondência entre monitores ativos e workers vivos."""
         active_ids = {
             monitor.id for monitor in self.repository.list_all_monitors() if monitor.active
@@ -206,8 +206,9 @@ class MonitoringManager:
                 for monitoring_id, service in self._services.items()
                 if service.snapshot().running
             }
-        stalled_ids = sorted(active_ids - running_ids)
-        orphaned_ids = sorted(running_ids - active_ids)
+        expected_ids = set() if monitoring_paused else active_ids
+        stalled_ids = expected_ids - running_ids
+        orphaned_ids = running_ids - expected_ids
         healthy = not stalled_ids and not orphaned_ids
         return {
             "status": "ok" if healthy else "degraded",
@@ -257,6 +258,8 @@ class MonitoringManager:
             query={
                 "origin": monitor.origin,
                 "destination": monitor.destination,
+                "origin_label": monitor.origin_label,
+                "destination_label": monitor.destination_label,
                 "travel_date": monitor.travel_date.isoformat(),
                 "travel_class": monitor.travel_class,
                 "passengers": monitor.passengers,
