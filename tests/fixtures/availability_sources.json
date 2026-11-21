@@ -1,0 +1,35 @@
+{
+  "list": {
+    "status_code": 200,
+    "updated_at": "2026-11-21T10:00:00Z",
+    "offers": [
+      {
+        "railway": "03", "from": "A", "to": "B", "departure": "2026-12-03T07:00:00-03:00",
+        "cabin": "ECO", "fare": "INT", "party": 1, "checked": "2026-11-21T09:59:00Z",
+        "state": "sold_out", "eligible": 0
+      },
+      {
+        "railway": "03", "from": "A", "to": "B", "departure": "2026-12-03T07:00:00-03:00",
+        "cabin": "EXE", "fare": "INT", "party": 1, "checked": "2026-11-21T09:59:00Z",
+        "state": "open", "eligible": 2
+      }
+    ]
+  },
+  "board": {
+    "service": "ready",
+    "published_at": "2026-11-21T07:00:00-03:00",
+    "journey": {
+      "line": "03", "stations": ["A", "B"], "starts_at": "2026-12-03T10:00:00Z",
+      "classes": {
+        "ECO": {
+          "verified_at": "2026-11-21T06:59:00-03:00", "tariff": "INT", "passengers": 1,
+          "inventory": {"exhausted": true, "eligible_places": 0}
+        },
+        "EXE": {
+          "verified_at": "2026-11-21T06:59:00-03:00", "tariff": "INT", "passengers": 1,
+          "inventory": {"exhausted": false, "eligible_places": 2}
+        }
+      }
+    }
+  }
+}
