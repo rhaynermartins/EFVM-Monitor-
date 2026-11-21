@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 
@@ -107,6 +109,54 @@ def test_resumes_paused_monitor_with_same_id(tmp_path: Path) -> None:
     assert resumed.running is True
     wait_for_status(service, created.monitoring_id, "TEM_VAGA")
     service.shutdown()
+
+
+@pytest.mark.parametrize("second_result", [AvailabilityStatus.TEM_VAGA, AvailabilityStatus.ERRO])
+def test_concurrent_checks_for_same_trip_keep_each_users_history_and_alerts(
+    tmp_path: Path, second_result: AvailabilityStatus,
+) -> None:
+    storage = MonitoringRepository(tmp_path / "concurrent.db")
+    storage.initialize()
+    first_user = storage.create_user(name="A", email="a@example.test", password_hash="unused")
+    second_user = storage.create_user(name="B", email="b@example.test", password_hash="unused")
+    first_trip = replace(settings("origem", "destino"), check_interval_seconds=300)
+    second_trip = replace(first_trip, check_interval_seconds=900)
+    first = storage.create_monitor(first_trip, user_id=first_user.id)
+    second = storage.create_monitor(second_trip, user_id=second_user.id)
+    available = AvailabilityStatus.TEM_VAGA
+    previous_check = "2020-01-01T00:00:00+00:00"
+    storage.record_check(first.id, AvailabilityStatus.SEM_VAGA, "Anterior", previous_check)
+    storage.record_check(second.id, available, "Anterior", previous_check)
+
+    checks_in_progress = Barrier(3, timeout=5)
+
+    class SessionClient(RouteClient):
+        def __init__(self, config: Settings) -> None:
+            self.status = {first_trip: available, second_trip: second_result}[config]
+
+        def check(self) -> AvailabilityResult:
+            checks_in_progress.wait()
+            return super().check()
+
+    alerts = []
+    service = MonitoringManager(
+        storage, client_factory=SessionClient,
+        notifier=lambda _, result, monitor_id, __: alerts.append((monitor_id, result.status)),
+    )
+    try:
+        service.resume(first.id, first_trip, user_id=first_user.id)
+        service.resume(second.id, second_trip, user_id=second_user.id)
+        checks_in_progress.wait()
+    finally:
+        service.shutdown()
+
+    first_history = service.history(first.id, user_id=first_user.id)
+    second_history = service.history(second.id, user_id=second_user.id)
+    assert [entry["result"] for entry in first_history] == ["TEM_VAGA", "SEM_VAGA"]
+    assert [entry["result"] for entry in second_history] == [second_result.value, "TEM_VAGA"]
+    assert alerts == [(first.id, available)]
+    with pytest.raises(MonitoringNotFound):
+        service.history(second.id, user_id=first_user.id)
 
 
 def test_soft_removal_preserves_database_without_listing_monitor(tmp_path: Path) -> None:
